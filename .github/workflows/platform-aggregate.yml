@@ -1,0 +1,37 @@
+name: Platform Aggregate
+
+on:
+  schedule:
+    - cron: '0 0 1,15 * *'
+  workflow_dispatch:
+
+jobs:
+  aggregate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Aggregate latest microservice releases (placeholder)
+        run: |
+          echo "(placeholder) curl ${JFROG_URL}/apptrust/api/v1/applications to find latest PROD versions"
+          echo "MS_VERSIONS='inventory:1.0.0,recommendations:1.0.0,checkout:1.0.0'" >> $GITHUB_ENV
+
+      - name: Create platform application version (placeholder)
+        run: |
+          echo "(placeholder) POST to AppTrust to create platform version with $MS_VERSIONS"
+          echo "PLATFORM_TAG=1.0.0" >> $GITHUB_ENV
+
+      - name: Dispatch platform release to helm repo
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -s -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/yonatanp-jfrog/bookverse-helm/dispatches \
+            -d "{\"event_type\":\"platform_release\",\"client_payload\":{\"tag\":\"${PLATFORM_TAG}\"}}"
+
