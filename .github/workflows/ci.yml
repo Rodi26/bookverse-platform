@@ -46,8 +46,8 @@ jobs:
 
       - name: Build Docker image
         run: |
-          IMAGE=${{ vars.PROJECT_KEY }}-${{ github.event.repository.name#bookverse- }}-docker-internal-local/${{ github.event.repository.name#bookverse- }}:$(echo $GITHUB_SHA | head -c7)
-          docker build -t ${{ vars.DOCKER_REGISTRY }}/$IMAGE .
+          # IMAGE=${{ vars.PROJECT_KEY }}-${{ github.event.repository.name#bookverse- }}-docker-internal-local/${{ github.event.repository.name#bookverse- }}:$(echo $GITHUB_SHA | head -c7)
+          # docker build -t ${{ vars.DOCKER_REGISTRY }}/$IMAGE .
 
       - name: Push artifacts (placeholder)
         run: |
