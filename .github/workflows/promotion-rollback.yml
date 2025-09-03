@@ -1,0 +1,101 @@
+name: Promotion Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (SemVer) to rollback (omit to use latest promoted)"
+        required: false
+        type: string
+      dry_run:
+        description: "Dry run (no mutations)"
+        required: false
+        default: false
+        type: boolean
+      DEMO_MODE:
+        description: 'Enable demo mode (verbose logs, request tracing)'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
+
+concurrency:
+  group: promotion-rollback-${{ github.event.repository.name }}
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    name: Rollback ${{ github.event.repository.name }} ${{ inputs.version || 'latest-promoted' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply DEMO_MODE settings
+        if: ${{ inputs.DEMO_MODE == 'true' || env.DEMO_MODE == 'true' }}
+        run: |
+          echo "🔔 DEMO_MODE enabled"
+          echo "ACTIONS_STEP_DEBUG=true" >> $GITHUB_ENV
+          echo "ACTIONS_RUNNER_DEBUG=true" >> $GITHUB_ENV
+          echo "HTTP_DEBUG_LEVEL=verbose" >> $GITHUB_ENV
+          echo "BASH_XTRACE_ENABLED=1" >> $GITHUB_ENV
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Execute rollback
+        shell: bash
+        env:
+          AT_BASE_URL_SECRET: ${{ secrets.APPTRUST_BASE_URL }}
+          APPTRUST_ACCESS_TOKEN: ${{ secrets.APPTRUST_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE_URL="${AT_BASE_URL_SECRET}"
+          if [ -z "${BASE_URL}" ]; then
+            echo "Base URL is required via secret 'APPTRUST_BASE_URL'" >&2
+            exit 2
+          fi
+
+          export APPTRUST_BASE_URL="${BASE_URL}"
+          if [ -z "${APPTRUST_ACCESS_TOKEN}" ]; then
+            echo "Missing secret APPTRUST_ACCESS_TOKEN" >&2
+            exit 2
+          fi
+
+          SERVICE_NAME=$(echo "${GITHUB_REPOSITORY#*/}" | sed 's/bookverse-//')
+          APP_KEY="bookverse-$SERVICE_NAME"
+
+          TARGET_VERSION="${{ inputs.version || '' }}"
+          if [ -z "$TARGET_VERSION" ]; then
+            echo "🔎 Resolving latest promoted version for $APP_KEY"
+            RESP_FILE=$(mktemp)
+            HTTP_STATUS=$(curl -sS -o "$RESP_FILE" -w "%{http_code}" \
+              "$APPTRUST_BASE_URL/applications/$APP_KEY/versions?limit=20&order_by=created&order_asc=false" \
+              -H "Authorization: Bearer $APPTRUST_ACCESS_TOKEN" \
+              -H "Accept: application/json")
+            if [[ "$HTTP_STATUS" -ge 200 && "$HTTP_STATUS" -lt 300 ]]; then
+              TARGET_VERSION=$(jq -r '.versions[] | select(.release_status == "RELEASED" or .release_status == "TRUSTED_RELEASE") | .version' "$RESP_FILE" | head -n1)
+            fi
+            rm -f "$RESP_FILE"
+            if [ -z "${TARGET_VERSION:-}" ] || [ "$TARGET_VERSION" = "null" ]; then
+              echo "❌ Could not resolve latest promoted version for $APP_KEY" >&2
+              exit 1
+            fi
+            echo "🎯 Defaulting to latest promoted version: $TARGET_VERSION"
+          fi
+
+          DRY_FLAG=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            DRY_FLAG="--dry-run"
+          fi
+
+          python3 .github/scripts/apptrust_rollback.py \
+            --app "$APP_KEY" \
+            --version "$TARGET_VERSION" \
+            ${DRY_FLAG}
+
+
