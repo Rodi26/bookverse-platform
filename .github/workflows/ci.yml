@@ -36,12 +36,18 @@ jobs:
 
       - name: Setup JFrog CLI
         uses: jfrog/setup-jfrog-cli@v4
+        env:
+          JF_URL: ${{ vars.JFROG_URL }}
+          JF_PROJECT: ${{ vars.PROJECT_KEY }}
         with:
           version: latest
+          oidc-provider-name: bookverse-platform-github
+          oidc-audience: ${{ vars.JFROG_URL }}
 
       - name: Configure JFrog CLI
         run: |
-          jf c add --interactive=false --url "${{ vars.JFROG_URL }}" --access-token ""
+          SERVER_ID="${SETUP_JFROG_CLI_SERVER_IDS:-setup-jfrog-cli-server}"
+          jf c use "$SERVER_ID" || true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -63,8 +69,8 @@ jobs:
 
       - name: Build Docker image
         run: |
-          # IMAGE=${{ vars.PROJECT_KEY }}-${{ github.event.repository.name#bookverse- }}-docker-internal-local/${{ github.event.repository.name#bookverse- }}:$(echo $GITHUB_SHA | head -c7)
-          # docker build -t ${{ vars.DOCKER_REGISTRY }}/$IMAGE .
+          # Placeholder: implement Docker build/push when platform service is containerized
+          echo "(placeholder) docker build/push for platform service"
 
       - name: Push artifacts (placeholder)
         run: |
