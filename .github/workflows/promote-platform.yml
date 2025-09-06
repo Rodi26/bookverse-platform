@@ -19,14 +19,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Export AppTrust context
-        env:
-          APPTRUST_BASE_URL: ${{ vars.APPTRUST_BASE_URL }}
-          APPTRUST_ACCESS_TOKEN: ${{ secrets.APPTRUST_ACCESS_TOKEN }}
-        run: |
-          echo "APPTRUST_BASE_URL=${APPTRUST_BASE_URL}" >> $GITHUB_ENV
-          echo "APPTRUST_ACCESS_TOKEN=${APPTRUST_ACCESS_TOKEN}" >> $GITHUB_ENV
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -34,6 +26,9 @@ jobs:
 
       - name: Promote platform version
         id: promote
+        env:
+          APPTRUST_BASE_URL: ${{ vars.APPTRUST_BASE_URL }}
+          APPTRUST_ACCESS_TOKEN: ${{ secrets.APPTRUST_ACCESS_TOKEN }}
         run: |
           python - << 'PY'
           import os, sys, json, urllib.request
