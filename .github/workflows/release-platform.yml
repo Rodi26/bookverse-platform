@@ -1,0 +1,120 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Platform application version (SemVer). Default: latest in STAGING"
+        required: false
+        type: string
+
+jobs:
+  release:
+    name: Release from STAGING to PROD
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: "[Setup] Checkout"
+        uses: actions/checkout@v4
+
+      - name: "[Setup] Python"
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: "[Resolve] Version (latest in STAGING if empty)"
+        id: resolve
+        env:
+          JFROG_URL: ${{ vars.JFROG_URL }}
+          JFROG_ADMIN_TOKEN: ${{ secrets.JFROG_ADMIN_TOKEN }}
+        run: |
+          python - << 'PY'
+          import os, json, urllib.request
+          base = (os.environ.get("JFROG_URL", "").rstrip('/') + "/apptrust/api/v1").rstrip('/')
+          token = os.environ.get("JFROG_ADMIN_TOKEN", "")
+          app = "bookverse-platform"
+          # Input preferred
+          version = "${{ github.event.inputs.version }}".strip()
+          def list_versions():
+            url = f"{base}/applications/{app}/versions?limit=50&order_by=created&order_asc=false"
+            req = urllib.request.Request(url=url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+              return json.loads(resp.read().decode("utf-8")) or {}
+          def get_content(ver:str):
+            url = f"{base}/applications/{app}/versions/{ver}/content"
+            req = urllib.request.Request(url=url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+              return json.loads(resp.read().decode("utf-8")) or {}
+          if not version:
+            data = list_versions(); vers = data.get("versions", [])
+            chosen = ""
+            for v in vers:
+              ver = str(v.get("version") or "").strip()
+              if not ver:
+                continue
+              try:
+                content = get_content(ver)
+              except Exception:
+                continue
+              cs = str(content.get("current_stage") or "")
+              if cs.endswith("STAGING"):
+                chosen = ver
+                break
+            if not chosen:
+              chosen = str((vers[0] or {}).get("version") or "") if vers else ""
+            version = chosen
+          if not version:
+            raise SystemExit("Could not determine platform version (no STAGING version found)")
+          geh = os.environ.get("GITHUB_ENV")
+          if geh:
+            with open(geh, 'a', encoding='utf-8') as f:
+              f.write(f"RESOLVED_VERSION={version}\n")
+          gout = os.environ.get("GITHUB_OUTPUT")
+          if gout:
+            with open(gout, 'a', encoding='utf-8') as f:
+              f.write(f"version={version}\n")
+          print(f"Resolved version: {version}")
+          PY
+
+      - name: "[Release] AppTrust"
+        env:
+          JFROG_URL: ${{ vars.JFROG_URL }}
+          JFROG_ADMIN_TOKEN: ${{ secrets.JFROG_ADMIN_TOKEN }}
+        run: |
+          python - << 'PY'
+          import os, json, urllib.request
+          base = (os.environ.get("JFROG_URL", "").rstrip('/') + "/apptrust/api/v1").rstrip('/')
+          token = os.environ.get("JFROG_ADMIN_TOKEN", "")
+          app = "bookverse-platform"
+          version = "${{ steps.resolve.outputs.version }}".strip() or os.environ.get("RESOLVED_VERSION", "${{ github.event.inputs.version }}").strip()
+          # Issue release call; platform uses generic release (no repos to include)
+          body = json.dumps({"promotion_type": "move"}).encode('utf-8')
+          req = urllib.request.Request(
+            url=f"{base}/applications/{app}/versions/{version}/release",
+            data=body,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            method="POST",
+          )
+          with urllib.request.urlopen(req, timeout=30) as resp:
+            print(resp.read().decode('utf-8'))
+          PY
+
+      - name: "[Helm] Pin version"
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository_owner }}/bookverse-helm
+          event-type: platform_release
+          client-payload: '{"platform_version": "${{ steps.resolve.outputs.version }}"}'
+
+      - name: "[Summary] Release"
+        run: |
+          echo "### Platform Release" >> $GITHUB_STEP_SUMMARY
+          echo "- **Application:** bookverse-platform" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ steps.resolve.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **From → To:** STAGING → PROD" >> $GITHUB_STEP_SUMMARY
+
+

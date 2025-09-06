@@ -83,7 +83,7 @@ jobs:
           python - <<'PY'
           import json, os
           text = open('preview_output.txt','r',encoding='utf-8').read()
-          def first_json(s:str):
+          def iter_json_objs(s:str):
               start=None; depth=0
               for i,ch in enumerate(s):
                   if ch=='{':
@@ -93,24 +93,68 @@ jobs:
                       if depth>0:
                           depth-=1
                           if depth==0 and start is not None:
-                              return s[start:i+1]
-              return None
+                              chunk = s[start:i+1]
+                              yield chunk
+                              start=None
           data = {}
-          j = first_json(text)
-          if j:
+          for chunk in iter_json_objs(text):
               try:
-                  data = json.loads(j)
+                  obj = json.loads(chunk)
               except Exception:
-                  pass
+                  continue
+              # Prefer the aggregator summary object
+              if isinstance(obj, dict) and ('platform_manifest_version' in obj or 'applications' in obj):
+                  data = obj
+                  break
+          if not data:
+              # Fallback to the last JSON object if present
+              last = None
+              for chunk in iter_json_objs(text):
+                  last = chunk
+              if last:
+                  try:
+                      data = json.loads(last)
+                  except Exception:
+                      data = {}
+          # Map application_key -> image repo from config for nicer table output (no digest in preview)
+          app_to_repo = {}
+          fallback_rows = []
+          try:
+              import yaml
+              cfg = yaml.safe_load(open('config/services.yaml','r',encoding='utf-8')) or {}
+              for svc in cfg.get('services', []) or []:
+                  app_key = (svc.get('apptrust_application') or '').strip()
+                  docker = svc.get('docker') or {}
+                  reg = (docker.get('registry') or '').strip()
+                  repo = (docker.get('repository') or '').strip()
+                  if app_key and repo:
+                      app_to_repo[app_key] = f"{reg}/{repo}" if reg else repo
+                  # Prepare fallback using simulated versions if needed
+                  simv = str((svc.get('simulated_version') or '')).strip()
+                  if app_key and simv:
+                      fallback_rows.append({'application_key': app_key, 'version': simv})
+          except Exception:
+              pass
           out = []
-          out.append("### Platform Aggregation Summary (Preview)")
+          out.append("### 🚀 Platform Aggregation Summary (Preview)")
           out.append("")
-          out.append(f"- Platform version (candidate): `{data.get('platform_version','N/A')}`")
+          out.append(f"- Platform version (candidate): `{data.get('platform_app_version','N/A')}`")
+          out.append("")
+          rows = data.get('applications', []) or []
+          if not rows:
+              rows = fallback_rows
+          rows = sorted(rows, key=lambda c: str(c.get('application_key','')))
+          out.append(f"#### Services ({len(rows)})")
           out.append("")
           out.append("| Service | Version | Image |")
           out.append("|---|---|---|")
-          for comp in data.get('components', []):
-              out.append(f"| {comp.get('service','')} | `{comp.get('version','')}` | `{comp.get('image','')}` |")
+          for comp in rows:
+              svc = str(comp.get('application_key',''))
+              ver = str(comp.get('version',''))
+              img = app_to_repo.get(svc,'')
+              out.append(f"| `{svc}` | `{ver}` | `{img}` |")
+          # Print to logs for debugging/visibility and write to job summary
+          print("\n".join(out))
           with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8') as f:
               f.write("\n".join(out) + "\n")
           PY
@@ -132,7 +176,7 @@ jobs:
           python - <<'PY'
           import json, os
           text = open('release_output.txt','r',encoding='utf-8').read()
-          def first_json(s:str):
+          def iter_json_objs(s:str):
               start=None; depth=0
               for i,ch in enumerate(s):
                   if ch=='{':
@@ -142,31 +186,257 @@ jobs:
                       if depth>0:
                           depth-=1
                           if depth==0 and start is not None:
-                              return s[start:i+1]
-              return None
+                              chunk = s[start:i+1]
+                              yield chunk
+                              start=None
           data = {}
-          j = first_json(text)
-          if j:
+          for chunk in iter_json_objs(text):
               try:
-                  data = json.loads(j)
+                  obj = json.loads(chunk)
               except Exception:
-                  pass
+                  continue
+              if isinstance(obj, dict) and ('platform_manifest_version' in obj or 'applications' in obj):
+                  data = obj
+                  break
+          if not data:
+              # Fallback to the last JSON object if present
+              last = None
+              for chunk in iter_json_objs(text):
+                  last = chunk
+              if last:
+                  try:
+                      data = json.loads(last)
+                  except Exception:
+                      data = {}
           manifest_path = None
           for line in text.splitlines():
               if line.startswith('Wrote manifest: '):
                   manifest_path = line.split('Wrote manifest: ',1)[1].strip()
                   break
+          # Map application_key -> image repo from config; later try to enrich with digest from manifest if present
+          app_to_repo = {}
+          fallback_rows = []
+          app_key_to_names = {}
+          try:
+              import yaml
+              cfg = yaml.safe_load(open('config/services.yaml','r',encoding='utf-8')) or {}
+              for svc in cfg.get('services', []) or []:
+                  app_key = (svc.get('apptrust_application') or '').strip()
+                  docker = svc.get('docker') or {}
+                  reg = (docker.get('registry') or '').strip()
+                  repo = (docker.get('repository') or '').strip()
+                  if app_key and repo:
+                      app_to_repo[app_key] = f"{reg}/{repo}" if reg else repo
+                  simv = str((svc.get('simulated_version') or '')).strip()
+                  if app_key and simv:
+                      fallback_rows.append({'application_key': app_key, 'version': simv})
+                  # Map service to candidate artifact names for size attribution
+                  if app_key:
+                      repo_base = repo.rsplit('/',1)[-1] if '/' in repo else repo
+                      variants = set()
+                      if repo_base:
+                          variants.add(repo_base)
+                          if repo_base.endswith('-api'):
+                              variants.add(repo_base[:-4])
+                      svc_name = str(svc.get('name','')).strip()
+                      if svc_name:
+                          variants.add(svc_name)
+                      app_key_to_names[app_key] = variants
+          except Exception:
+              pass
+          # Compute per-service size from the written manifest if available
+          service_sizes = {}
+          if manifest_path:
+              try:
+                  import yaml
+                  def _is_int_like(x):
+                      return isinstance(x,(int,float)) or str(x or '').isdigit()
+                  m = yaml.safe_load(open(manifest_path,'r',encoding='utf-8')) or {}
+                  apps = m.get('applications', []) or []
+                  for a in apps:
+                      app_key = str(a.get('application_key','')).strip()
+                      names = app_key_to_names.get(app_key, set())
+                      rels = (a.get('releasables') or {}).get('releasables') if isinstance(a.get('releasables'), dict) else (a.get('releasables') or [])
+                      total = 0
+                      for r in rels or []:
+                          pt = str(r.get('package_type','')).strip()
+                          nm = str(r.get('name','')).strip()
+                          if pt != 'docker':
+                              continue
+                          if nm.startswith('sha256__'):
+                              continue
+                          if names and nm not in names:
+                              continue
+                          sz = r.get('total_size')
+                          if _is_int_like(sz):
+                              total += int(sz)
+                      if total > 0:
+                          service_sizes[app_key] = total
+              except Exception:
+                  service_sizes = {}
+          # If we don't have applications from JSON, try to parse the written manifest for rows
+          manifest_rows = []
+          if (not data.get('applications')) and manifest_path:
+              try:
+                  import yaml
+                  m = yaml.safe_load(open(manifest_path,'r',encoding='utf-8')) or {}
+                  for comp in m.get('applications', []) or []:
+                      manifest_rows.append({'application_key': comp.get('application_key',''), 'version': comp.get('version','')})
+                  # Also pick platform_app_version from manifest if missing
+                  if not data.get('platform_app_version') and m.get('platform_app_version'):
+                      data['platform_app_version'] = m.get('platform_app_version')
+              except Exception:
+                  pass
           out = []
-          out.append("### Platform Aggregation Summary (Release)")
+          out.append("### 🚀 Platform Aggregation Summary (Release)")
           out.append("")
-          out.append(f"- Platform version: `{data.get('platform_version','N/A')}`")
+          out.append(f"- Platform version: `{data.get('platform_app_version','N/A')}`")
           if manifest_path:
               out.append(f"- Manifest written: `{manifest_path}`")
           out.append("")
-          out.append("| Service | Version | Image |")
-          out.append("|---|---|---|")
-          for comp in data.get('components', []):
-              out.append(f"| {comp.get('service','')} | `{comp.get('version','')}` | `{comp.get('image','')}` |")
+          rows = data.get('applications', []) or manifest_rows or fallback_rows
+          rows = sorted(rows, key=lambda c: str(c.get('application_key','')))
+          out.append(f"#### Services ({len(rows)})")
+          out.append("")
+          out.append("| Service | Version | Image | Size |")
+          out.append("|---|---|---|---|")
+          for comp in rows:
+              svc = str(comp.get('application_key',''))
+              ver = str(comp.get('version',''))
+              img = app_to_repo.get(svc,'')
+              size_val = service_sizes.get(svc)
+              def _human_size(n):
+                  try:
+                      s = float(n)
+                  except Exception:
+                      return ""
+                  units = ['B','KB','MB','GB','TB']
+                  for u in units:
+                      if s < 1024.0 or u == units[-1]:
+                          return f"{s:.1f} {u}"
+                      s /= 1024.0
+              size_str = _human_size(size_val) if size_val else ""
+              out.append(f"| `{svc}` | `{ver}` | `{img}` | `{size_str}` |")
+          # Print to logs for debugging/visibility and write to job summary
+          print("\n".join(out))
           with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8') as f:
               f.write("\n".join(out) + "\n")
+
+          # Build Aggregated Content table from AppTrust content API
+          # Fallback: derive from written manifest's application releasables
+          platform_app_key = os.environ.get('PLATFORM_APP_KEY', 'bookverse-platform')
+          platform_ver = str(data.get('platform_app_version') or '').strip()
+          # content_map: (application_name, application_version) -> list[(pkg_type,name,version,total_size)]
+          content_map = {}
+          try:
+              import urllib.request, urllib.parse, time
+              base = os.environ.get('APPTRUST_BASE_URL','').rstrip('/')
+              if base and platform_ver:
+                  url = f"{base}/applications/{urllib.parse.quote(platform_app_key)}/versions/{urllib.parse.quote(platform_ver)}/content?include=releasables"
+                  rels = []
+                  for attempt in range(6):
+                      try:
+                          req = urllib.request.Request(url, headers={'Authorization': f"Bearer {os.environ.get('APPTRUST_ACCESS_TOKEN','')}"})
+                          with urllib.request.urlopen(req, timeout=30) as resp:
+                              raw = resp.read().decode('utf-8', errors='replace')
+                          cont = json.loads(raw) if raw else {}
+                      except Exception:
+                          cont = {}
+                      rels = cont.get('releasables', []) or []
+                      if rels:
+                          break
+                      time.sleep(3)
+                  # Group by release_bundle source (application/version)
+                  grouped = {}
+                  for r in rels:
+                      pkg_type = str(r.get('package_type','')).strip()
+                      rname = str(r.get('name','')).strip()
+                      rver = str(r.get('version','')).strip()
+                      rsize = int((r.get('total_size') or 0)) if isinstance(r.get('total_size'), (int, float)) or str(r.get('total_size') or '').isdigit() else 0
+                      srcs = r.get('sources', []) or []
+                      rb_name, rb_ver = None, None
+                      for s in srcs:
+                          if (s or {}).get('type') == 'release_bundle' and (s or {}).get('release_bundle'):
+                              rb = s['release_bundle']
+                              rb_name = str(rb.get('name','')).strip()
+                              rb_ver = str(rb.get('version','')).strip()
+                              break
+                      if not rb_name:
+                          # Skip entries we cannot attribute to an application/version
+                          continue
+                      key = (rb_name, rb_ver)
+                      grouped.setdefault(key, []).append((pkg_type, rname, rver, rsize))
+                  content_map = grouped
+          except Exception:
+              pass
+          if not content_map:
+              # Fallback: derive from manifest file applications' releasables
+              if manifest_path:
+                  try:
+                      import yaml
+                      m = yaml.safe_load(open(manifest_path,'r',encoding='utf-8')) or {}
+                      apps = m.get('applications', []) or []
+                      for a in apps:
+                          aname = str(a.get('application_key','')).strip()
+                          aver = str(a.get('version','')).strip()
+                          rels = (a.get('releasables') or {}).get('releasables') if isinstance(a.get('releasables'), dict) else (a.get('releasables') or [])
+                          items = []
+                          for r in rels or []:
+                              pt = str(r.get('package_type','')).strip()
+                              nm = str(r.get('name','')).strip()
+                              vr = str(r.get('version','')).strip()
+                              sz = int((r.get('total_size') or 0)) if isinstance(r.get('total_size'), (int, float)) or str(r.get('total_size') or '').isdigit() else 0
+                              if pt and nm and vr:
+                                  items.append((pt, nm, vr, sz))
+                          if items:
+                              content_map[(aname, aver)] = items
+                  except Exception:
+                      pass
+          if content_map:
+              total_items = sum(len(v) for v in content_map.values())
+              grand_total_size = sum(sum(int(t[3]) if len(t) > 3 else 0 for t in items) for items in content_map.values())
+              def _human_size(n):
+                  try:
+                      s = float(n)
+                  except Exception:
+                      return "0 B"
+                  units = ['B','KB','MB','GB','TB']
+                  for u in units:
+                      if s < 1024.0 or u == units[-1]:
+                          return f"{s:.1f} {u}"
+                      s /= 1024.0
+              outc = []
+              outc.append("")
+              outc.append("### 📦 Aggregated Content")
+              outc.append("")
+              outc.append(f"_Applications: {len(content_map)} · Items: {total_items} · Total Size: {_human_size(grand_total_size)} _")
+              outc.append("")
+              for (aname, aver) in sorted(content_map.keys()):
+                  items = sorted(content_map[(aname, aver)], key=lambda t: (t[0], t[1], t[2]))
+                  total_sz = sum(int(t[3]) if len(t) > 3 else 0 for t in items)
+                  outc.append(f"<details>")
+                  outc.append(f"<summary><strong><code>{aname}</code></strong> — <code>{aver}</code> · {len(items)} item(s) · {_human_size(total_sz)}</summary>")
+                  outc.append("")
+                  outc.append("\n".join([
+                      "| Type | Name | Version | Size |",
+                      "|---|---|---|---|",
+                  ]))
+                  for (pt, nm, vr, _sz) in items:
+                      outc.append(f"| `{pt}` | `{nm}` | `{vr}` | `{_human_size(_sz)}` |")
+                  outc.append("")
+                  outc.append("</details>")
+                  outc.append("")
+              print("\n".join(outc))
+              with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8') as f:
+                  f.write("\n".join(outc) + "\n")
+          else:
+              # Emit section with note when content is not yet available
+              outc = []
+              outc.append("")
+              outc.append("### 📦 Aggregated Content")
+              outc.append("")
+              outc.append("_No aggregated content available yet (platform content still processing). Will appear on subsequent runs._")
+              print("\n".join(outc))
+              with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8') as f:
+                  f.write("\n".join(outc) + "\n")
           PY

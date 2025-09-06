@@ -168,6 +168,32 @@ def aggregate_platform_release(stage: str = "PROD", constraints: Constraints) ->
 6) ArgoCD detects chart update and syncs.
 7) Presenter can open the site, confirm versions via env banner and optional `/info` endpoints.
 
+## Webhook-driven Helm Pinning (Planned)
+
+- Trigger: AppTrust `release_completed` for `bookverse-platform` to PROD.
+- JFrog Webhook:
+  - Endpoint: `https://api.github.com/repos/yonatanp-jfrog/bookverse-helm/dispatches`
+  - Method: `POST`
+  - Headers:
+    - `Authorization: Bearer <GitHub PAT with repo:write>`
+    - `Accept: application/vnd.github+json`
+    - `Content-Type: application/json`
+  - Body template:
+
+    ```json
+    {
+      "event_type": "platform_release",
+      "client_payload": { "platform_version": "{{applicationVersion}}" }
+    }
+    ```
+
+- Receiver: `bookverse-helm/.github/workflows/platform_release_handler.yml`
+  - Resolves components from AppTrust for that platform version.
+  - Pins `platform.version` and per-service `tag` across `values-*.yaml`.
+  - Commits and packages the chart.
+- Security: prefer fine-grained PAT limited to `bookverse-helm` (contents:write). Future: GitHub App.
+- Manual dry-run: send the same `repository_dispatch` via curl to validate end-to-end before enabling webhook.
+
 ## Failure Modes and Idempotency
 
 - Missing microservice version in stage: stop and emit actionable error (which service is missing in `PROD`).
