@@ -49,5 +49,5 @@ jobs:
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/yonatanp-jfrog/bookverse-helm/dispatches \
-            -d "{\"event_type\":\"platform_release\",\"client_payload\":{\"tag\":\"${PLATFORM_TAG}\"}}"
+            -d "{\"event_type\":\"platform_release\",\"client_payload\":{\"platform_version\":\"${PLATFORM_TAG}\"}}"
 

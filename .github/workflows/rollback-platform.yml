@@ -1,0 +1,29 @@
+name: Rollback Platform Version (PROD)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Platform version to rollback (SemVer)"
+        required: true
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run rollback
+        env:
+          APPTRUST_BASE_URL: ${{ vars.APPTRUST_BASE_URL }}
+          APPTRUST_ACCESS_TOKEN: ${{ secrets.APPTRUST_ACCESS_TOKEN }}
+        run: |
+          python bookverse-platform/scripts/apptrust_rollback.py --version "${{ github.event.inputs.version }}" --base-url "$APPTRUST_BASE_URL" --token "$APPTRUST_ACCESS_TOKEN"
+
+
