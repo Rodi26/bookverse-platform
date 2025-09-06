@@ -7,6 +7,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from functools import cmp_to_key
 
 import yaml
 
@@ -86,7 +87,7 @@ def sort_versions_by_semver_desc(version_strings: List[str]) -> List[str]:
         if sv is not None:
             parsed.append((sv, v))
     # Use the SemVer objects for proper ordering
-    parsed.sort(key=lambda t: t[0], reverse=True)  # type: ignore[arg-type]
+    parsed.sort(key=cmp_to_key(lambda a, b: compare_semver(a[0], b[0])), reverse=True)
     return [v for _, v in parsed]
 
 
