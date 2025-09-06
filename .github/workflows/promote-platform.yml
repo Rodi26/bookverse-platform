@@ -4,13 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Platform application version (SemVer)"
-        required: true
+        description: "Platform application version (SemVer). If empty, use latest."
+        required: false
+        type: string
       target_stage:
-        description: "Target stage (QA, STAGING, PROD)"
+        description: "Target stage (bookverse-DEV, bookverse-QA, bookverse-STAGING)"
         required: true
         type: choice
-        options: [ QA, STAGING, PROD ]
+        default: bookverse-STAGING
+        options: [ bookverse-DEV, bookverse-QA, bookverse-STAGING ]
 
 jobs:
   promote:
@@ -37,33 +39,62 @@ jobs:
         run: |
           python - << 'PY'
           import os, sys, json, urllib.request
-          # Derive AppTrust from canonical JFrog URL, reusing admin token for demo
+          from urllib.error import HTTPError, URLError
+          # Base API and auth
           base = (os.environ.get("JFROG_URL", "").rstrip('/') + "/apptrust/api/v1").rstrip('/')
           token = os.environ.get("JFROG_ADMIN_TOKEN", "")
           app = "bookverse-platform"
-          version = os.environ["INPUT_VERSION"] if "INPUT_VERSION" in os.environ else "${{ github.event.inputs.version }}"
-          target_stage = os.environ["INPUT_TARGET_STAGE"].upper() if "INPUT_TARGET_STAGE" in os.environ else "${{ github.event.inputs.target_stage }}".upper()
-          if target_stage not in ("QA","STAGING","PROD"):
-            print("Target stage must be QA, STAGING, or PROD", file=sys.stderr)
+          # Resolve inputs
+          input_version = os.environ.get("INPUT_VERSION", "${{ github.event.inputs.version }}").strip()
+          target_stage = os.environ.get("INPUT_TARGET_STAGE", "${{ github.event.inputs.target_stage }}").strip()
+          allowed = {"bookverse-DEV", "bookverse-QA", "bookverse-STAGING"}
+          if target_stage not in allowed:
+            print(f"Target stage must be one of {sorted(allowed)}", file=sys.stderr)
             sys.exit(2)
+          # Determine version if not provided: latest by created desc
+          version = input_version
+          if not version:
+            url = f"{base}/applications/{app}/versions?limit=1&order_by=created&order_asc=false"
+            req = urllib.request.Request(url=url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
+            try:
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode("utf-8")) or {}
+                version = str((data.get("versions") or [{}])[0].get("version") or "").strip()
+            except Exception as e:
+              print(f"Failed to resolve latest version: {e}", file=sys.stderr)
+              sys.exit(1)
+            if not version:
+              print("Could not determine latest platform version", file=sys.stderr)
+              sys.exit(1)
+          # Export resolved version and current stage before promotion
+          try:
+            req = urllib.request.Request(url=f"{base}/applications/{app}/versions/{version}/content", headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+              content = json.loads(resp.read().decode("utf-8")) or {}
+              current_stage = str(content.get("current_stage") or "")
+          except Exception:
+            current_stage = ""
+          geh = os.environ.get("GITHUB_ENV")
+          if geh:
+            with open(geh, "a", encoding="utf-8") as f:
+              f.write(f"RESOLVED_VERSION={version}\n")
+              if current_stage:
+                f.write(f"CURRENT_STAGE_BEFORE={current_stage}\n")
+          # Perform promotion
+          body = json.dumps({"target_stage": target_stage}).encode('utf-8')
           req = urllib.request.Request(
             url=f"{base}/applications/{app}/versions/{version}/promote",
-            data=json.dumps({"target_stage": target_stage}).encode('utf-8'),
+            data=body,
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
             method="POST",
           )
-          with urllib.request.urlopen(req, timeout=30) as resp:
-            print(resp.read().decode('utf-8'))
+          try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+              print(resp.read().decode('utf-8'))
+          except HTTPError as e:
+            print(e.read().decode('utf-8', errors='replace'), file=sys.stderr)
+            raise
           PY
-
-      - name: "[Helm] Pin version (on PROD)"
-        if: ${{ inputs.target_stage == 'PROD' }}
-        uses: peter-evans/repository-dispatch@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository_owner }}/bookverse-helm
-          event-type: platform_release
-          client-payload: '{"platform_version": "${{ github.event.inputs.version }}"}'
 
       - name: "[Summary] Promotion"
         if: always()
@@ -98,7 +129,7 @@ jobs:
           echo "### Executive Summary" >> $GITHUB_STEP_SUMMARY
           echo "- **Lifecycle:** UNASSIGNED → DEV → QA → STAGING → PROD" >> $GITHUB_STEP_SUMMARY
           echo "- **Application:** bookverse-platform" >> $GITHUB_STEP_SUMMARY
-          echo "- **Version:** ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${RESOLVED_VERSION:-${{ inputs.version }}}" >> $GITHUB_STEP_SUMMARY
           echo "- **From → To:** ${CURRENT_DISPLAY} → ${TARGET_DISPLAY}" >> $GITHUB_STEP_SUMMARY
           echo "- **Outcome:** ✅ ${OUTCOME}" >> $GITHUB_STEP_SUMMARY
 
