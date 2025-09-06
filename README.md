@@ -44,10 +44,14 @@ You can force specific service versions:
 python -m app.main --source-stage PROD --override inventory=1.8.2 --override checkout=0.7.1
 ```
 
-### GitHub Actions
+### Workflows
 
-- Manual dispatch workflow: `.github/workflows/aggregate.yml`
-- Bi-weekly Monday schedule is documented but commented out by default for development.
+- [`aggregate.yml`](.github/workflows/aggregate.yml) — Manual (default) aggregator. Resolves latest PROD microservice versions and:
+  - Preview mode (default): prints a summary only
+  - Write mode (`write=true`): writes manifest under `manifests/` and creates a platform version in AppTrust
+  - Real environments may enable a schedule (every second Monday 09:00 UTC) — commented out by default
+- [`promote-platform.yml`](.github/workflows/promote-platform.yml) — Promote a platform version to QA/STAGING/PROD via AppTrust; when targeting PROD, dispatches a helm pin to `bookverse-helm`
+- [`rollback-platform.yml`](.github/workflows/rollback-platform.yml) — Roll back a platform version in PROD; supports optional auto-resolution of the latest promoted version and a `dry_run` mode
 
 ## CI Expectations
 

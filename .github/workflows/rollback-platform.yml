@@ -1,4 +1,5 @@
-name: Rollback Platform Version (PROD)            - AppTrust rollback for platform version                                                                    
+# AppTrust rollback for platform version
+name: Rollback
 
 on:
   workflow_dispatch:
@@ -15,26 +16,28 @@ on:
 
 jobs:
   rollback:
+    name: Rollback
     runs-on: ubuntu-latest
+    env:
+      JFROG_URL: ${{ vars.JFROG_URL }}
+      JFROG_ADMIN_TOKEN: ${{ secrets.JFROG_ADMIN_TOKEN }}
     steps:
-      - name: Checkout
+      - name: "[Setup] Checkout"
         uses: actions/checkout@v4
 
-      - name: Export AppTrust context
+      - name: "[Setup] AppTrust context"
         run: |
-          echo "APPTRUST_BASE_URL=${{ vars.APPTRUST_BASE_URL }}" >> $GITHUB_ENV
-          echo "APPTRUST_ACCESS_TOKEN=${{ secrets.APPTRUST_ACCESS_TOKEN }}" >> $GITHUB_ENV
+          BASE="${JFROG_URL%/}"
+          echo "APPTRUST_BASE_URL=${BASE}/apptrust/api/v1" >> "$GITHUB_ENV"
+          echo "APPTRUST_ACCESS_TOKEN=${JFROG_ADMIN_TOKEN}" >> "$GITHUB_ENV"
 
-      - name: Setup Python
+      - name: "[Setup] Python"
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Resolve target version
+      - name: "[Resolve] Target version"
         shell: bash
-        env:
-          APPTRUST_BASE_URL: ${{ env.APPTRUST_BASE_URL }}
-          APPTRUST_ACCESS_TOKEN: ${{ env.APPTRUST_ACCESS_TOKEN }}
         run: |
           set -euo pipefail
           TARGET_VERSION="${{ github.event.inputs.version }}"
@@ -57,12 +60,12 @@ jobs:
           fi
           echo "TARGET_VERSION=$TARGET_VERSION" >> $GITHUB_ENV
 
-      - name: Dry run
+      - name: "[Dry Run] Validate only"
         if: ${{ inputs.dry_run == true }}
         run: |
           echo "DRY RUN: Would invoke rollback for version ${TARGET_VERSION}"
 
-      - name: Run rollback
+      - name: "[Rollback] Execute"
         if: ${{ inputs.dry_run != true }}
         working-directory: bookverse-platform
         run: |
