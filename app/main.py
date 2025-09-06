@@ -140,6 +140,29 @@ RELEASED = "RELEASED"
 TRUSTED = "TRUSTED_RELEASE"
 
 
+def compute_next_semver_for_application(client: AppTrustClient, app_key: str) -> str:
+    """Return next SemVer for the given application by incrementing PATCH.
+
+    Logic mirrors the CI flows used by individual services:
+    - Fetch latest created version
+    - If present and SemVer-compatible, increment the patch component
+    - Otherwise default to 1.0.0
+    """
+    try:
+        resp = client.list_application_versions(app_key, limit=1)
+        versions = resp.get("versions", []) if isinstance(resp, dict) else []
+        latest = str(versions[0].get("version", "")) if versions else ""
+    except Exception:
+        latest = ""
+
+    if latest:
+        parsed = SemVer.parse(latest)
+        if parsed is not None:
+            return f"{parsed.major}.{parsed.minor}.{parsed.patch + 1}"
+
+    return "1.0.0"
+
+
 def pick_latest_prod_version(client: AppTrustClient, app_key: str) -> Optional[str]:
     resp = client.list_application_versions(app_key)
     versions = resp.get("versions", [])
@@ -151,72 +174,67 @@ def pick_latest_prod_version(client: AppTrustClient, app_key: str) -> Optional[s
     return ordered[0] if ordered else None
 
 
-def resolve_live_components(services_cfg: List[Dict[str, Any]], client: AppTrustClient) -> List[Dict[str, Any]]:
-    enriched: List[Dict[str, Any]] = []
+def resolve_promoted_versions(services_cfg: List[Dict[str, Any]], client: AppTrustClient) -> List[Dict[str, Any]]:
+    """Resolve latest promoted (PROD) version per configured application.
+
+    Returns list entries with: name, apptrust_application, resolved_version.
+    """
+    resolved: List[Dict[str, Any]] = []
     for s in services_cfg:
         name = s.get("name")
         app_key = s.get("apptrust_application")
-        docker = s.get("docker", {})
-        if not name or not app_key or not docker.get("registry") or not docker.get("repository"):
+        if not name or not app_key:
             raise ValueError(f"Service config missing required fields: {s}")
         latest = pick_latest_prod_version(client, app_key)
         if not latest:
             raise RuntimeError(f"No PROD version found for application {app_key}")
-        enriched.append(
+        resolved.append(
             {
                 "name": name,
                 "apptrust_application": app_key,
-                "docker": docker,
                 "resolved_version": latest,
-                "resolved_digest": "sha256:UNKNOWN",
             }
         )
-    return enriched
+    return resolved
 
 
-def build_manifest(services: List[Dict[str, Any]], source_stage: str) -> Dict[str, Any]:
+def build_manifest(applications: List[Dict[str, Any]], client: AppTrustClient, source_stage: str) -> Dict[str, Any]:
     if source_stage != "PROD":
         raise ValueError("Platform aggregation demo only supports source_stage=PROD")
 
     now = dt.datetime.utcnow().replace(tzinfo=dt.timezone.utc)
     manifest_version = now.strftime("%Y.%m.%d.%H%M%S")
 
-    microservices: Dict[str, Any] = {}
-    for service in services:
-        name = service.get("name")
-        apptrust_application = service.get("apptrust_application")
-        docker = service.get("docker", {})
-        registry = docker.get("registry")
-        repository = docker.get("repository")
-        version = service.get("resolved_version") or service.get("simulated_version", "0.0.0-sim")
-        digest = service.get("resolved_digest") or service.get("simulated_digest", "sha256:SIMULATED")
+    apps_block: List[Dict[str, Any]] = []
+    for entry in applications:
+        app_key = entry.get("apptrust_application")
+        version = entry.get("resolved_version") or entry.get("simulated_version", "0.0.0-sim")
+        if not app_key or not version:
+            raise ValueError(f"Application entry missing required fields: {entry}")
 
-        if not name or not apptrust_application or not registry or not repository:
-            raise ValueError(
-                f"Service entry missing required fields: name/apptrust_application/docker.registry/docker.repository — {service}"
-            )
+        content = client.get_version_content(app_key, str(version)) or {}
+        sources = content.get("sources", {}) if isinstance(content, dict) else {}
+        releasables = content.get("releasables", {}) if isinstance(content, dict) else {}
 
-        microservices[name] = {
-            "apptrust_application": apptrust_application,
-            "apptrust_version": version,
-            "image": {
-                "registry": registry,
-                "repository": repository,
-                "tag": version,
-                "digest": digest,
-            },
-        }
+        apps_block.append(
+            {
+                "application_key": app_key,
+                "version": version,
+                "sources": sources,
+                "releasables": releasables,
+            }
+        )
 
     manifest: Dict[str, Any] = {
         "version": manifest_version,
         "created_at": now.isoformat().replace("+00:00", "Z"),
         "source_stage": source_stage,
-        "microservices": microservices,
+        "applications": apps_block,
         "provenance": {
             # SBOM evidence is handled automatically by AppTrust; not generated here
             "evidence_minimums": {"signatures_present": True},
         },
-        "notes": "Auto-generated by platform-aggregator (simulated)",
+        "notes": "Auto-generated by platform-aggregator (applications & versions)",
     }
     return manifest
 
@@ -231,17 +249,23 @@ def write_manifest(output_dir: Path, manifest: Dict[str, Any]) -> Path:
 
 
 def format_summary(manifest: Dict[str, Any]) -> str:
-    micro = manifest.get("microservices", {})
+    apps = manifest.get("applications", [])
     rows = []
-    for name, details in micro.items():
+    for comp in apps:
         rows.append(
             {
-                "service": name,
-                "version": details.get("apptrust_version"),
-                "image": f"{details['image']['registry']}/{details['image']['repository']}:{details['image']['tag']}",
+                "application_key": comp.get("application_key"),
+                "version": comp.get("version"),
             }
         )
-    return json.dumps({"platform_version": manifest["version"], "components": rows}, indent=2)
+    return json.dumps(
+        {
+            "platform_manifest_version": manifest["version"],
+            "platform_app_version": manifest.get("platform_app_version", ""),
+            "applications": rows,
+        },
+        indent=2,
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -299,7 +323,7 @@ def main() -> int:
         print("Missing APPTRUST_BASE_URL or APPTRUST_ACCESS_TOKEN (live mode only)", flush=True)
         return 2
     client = AppTrustClient(base_url=base_url, token=token)
-    services = resolve_live_components(services_cfg, client)
+    services = resolve_promoted_versions(services_cfg, client)
     # Apply overrides if provided
     overrides: Dict[str, str] = {}
     for ov in getattr(args, "override", []) or []:
@@ -319,7 +343,14 @@ def main() -> int:
             if name in overrides:
                 s["resolved_version"] = overrides[name]
 
-    manifest = build_manifest(services, source_stage)
+    manifest = build_manifest(services, client, source_stage)
+
+    # Determine next platform application SemVer (patch bump) following service CI logic
+    platform_app_key = str(getattr(args, "platform_app"))
+    platform_app_version = compute_next_semver_for_application(client, platform_app_key)
+
+    # Include platform app SemVer in manifest for visibility (manifest version remains CalVer)
+    manifest["platform_app_version"] = platform_app_version
 
     print(format_summary(manifest))
 
@@ -331,8 +362,7 @@ def main() -> int:
             {"application_key": s["apptrust_application"], "version": s["resolved_version"]}
             for s in services
         ]
-        platform_app_key = str(getattr(args, "platform_app"))
-        resp = client.create_platform_version(platform_app_key, manifest["version"], sources_versions)
+        resp = client.create_platform_version(platform_app_key, platform_app_version, sources_versions)
         print(json.dumps({"platform_version_created": resp}, indent=2))
     else:
         print("Preview: resolved live versions; no files written and no AppTrust changes. Omit --preview to create the platform version and write the manifest.")
