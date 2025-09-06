@@ -1,11 +1,17 @@
-name: Rollback Platform Version (PROD)
+name: Rollback Platform Version (PROD)            - AppTrust rollback for platform version                                                                    
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Platform version to rollback (SemVer)"
-        required: true
+        description: "Version to rollback (SemVer). Omit to use latest promoted"
+        required: false
+        type: string
+      dry_run:
+        description: "Dry run (no mutations)"
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   rollback:
@@ -14,16 +20,52 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Export AppTrust context
+        run: |
+          echo "APPTRUST_BASE_URL=${{ vars.APPTRUST_BASE_URL }}" >> $GITHUB_ENV
+          echo "APPTRUST_ACCESS_TOKEN=${{ secrets.APPTRUST_ACCESS_TOKEN }}" >> $GITHUB_ENV
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Run rollback
+      - name: Resolve target version
+        shell: bash
         env:
-          APPTRUST_BASE_URL: ${{ vars.APPTRUST_BASE_URL }}
-          APPTRUST_ACCESS_TOKEN: ${{ secrets.APPTRUST_ACCESS_TOKEN }}
+          APPTRUST_BASE_URL: ${{ env.APPTRUST_BASE_URL }}
+          APPTRUST_ACCESS_TOKEN: ${{ env.APPTRUST_ACCESS_TOKEN }}
         run: |
-          python bookverse-platform/scripts/apptrust_rollback.py --version "${{ github.event.inputs.version }}" --base-url "$APPTRUST_BASE_URL" --token "$APPTRUST_ACCESS_TOKEN"
+          set -euo pipefail
+          TARGET_VERSION="${{ github.event.inputs.version }}"
+          if [ -z "${TARGET_VERSION}" ]; then
+            APP_KEY="bookverse-platform"
+            RESP_FILE=$(mktemp)
+            HTTP_STATUS=$(curl -sS -o "$RESP_FILE" -w "%{http_code}" \
+              "$APPTRUST_BASE_URL/applications/$APP_KEY/versions?limit=20&order_by=created&order_asc=false" \
+              -H "Authorization: Bearer $APPTRUST_ACCESS_TOKEN" \
+              -H "Accept: application/json")
+            if [[ "$HTTP_STATUS" -ge 200 && "$HTTP_STATUS" -lt 300 ]]; then
+              TARGET_VERSION=$(jq -r '.versions[] | select(.release_status == "RELEASED" or .release_status == "TRUSTED_RELEASE") | .version' "$RESP_FILE" | head -n1)
+            fi
+            rm -f "$RESP_FILE"
+            if [ -z "${TARGET_VERSION:-}" ] || [ "$TARGET_VERSION" = "null" ]; then
+              echo "Could not resolve latest promoted version for $APP_KEY" >&2
+              exit 1
+            fi
+            echo "Resolved target version: $TARGET_VERSION"
+          fi
+          echo "TARGET_VERSION=$TARGET_VERSION" >> $GITHUB_ENV
+
+      - name: Dry run
+        if: ${{ inputs.dry_run == true }}
+        run: |
+          echo "DRY RUN: Would invoke rollback for version ${TARGET_VERSION}"
+
+      - name: Run rollback
+        if: ${{ inputs.dry_run != true }}
+        working-directory: bookverse-platform
+        run: |
+          python scripts/apptrust_rollback.py --version "${TARGET_VERSION}" --base-url "$APPTRUST_BASE_URL" --token "$APPTRUST_ACCESS_TOKEN"
 
 
