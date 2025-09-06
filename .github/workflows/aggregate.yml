@@ -16,6 +16,9 @@ jobs:
   aggregate:
     name: Aggregate
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     env:
       # Prefer canonical JFrog variables used across the repo
       JFROG_URL: ${{ vars.JFROG_URL }}
@@ -28,6 +31,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
 
       - name: "[Setup] Install dependencies"
         run: |

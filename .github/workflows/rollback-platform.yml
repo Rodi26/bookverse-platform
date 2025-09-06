@@ -18,6 +18,9 @@ jobs:
   rollback:
     name: Rollback
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     env:
       JFROG_URL: ${{ vars.JFROG_URL }}
       JFROG_ADMIN_TOKEN: ${{ secrets.JFROG_ADMIN_TOKEN }}
@@ -35,6 +38,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
 
       - name: "[Resolve] Target version"
         shell: bash
