@@ -6,11 +6,32 @@ on:
   #   - cron: '0 9 */14 * 1'
   workflow_dispatch:
     inputs:
-      write:
-        description: "Create platform version and write manifest (default false runs preview only)"
+      create:
+        description: "Create platform version and write manifest"
+        required: false
+        default: true
+        type: boolean
+      preview:
+        description: "Preview only (no writes)"
         required: false
         default: false
         type: boolean
+      inventory_version:
+        description: "Force inventory version (optional)"
+        required: false
+        type: string
+      recommendations_version:
+        description: "Force recommendations version (optional)"
+        required: false
+        type: string
+      checkout_version:
+        description: "Force checkout version (optional)"
+        required: false
+        type: string
+      web_version:
+        description: "Force web version (optional)"
+        required: false
+        type: string
 
 jobs:
   aggregate:
@@ -47,14 +68,26 @@ jobs:
           echo "APPTRUST_ACCESS_TOKEN=${JFROG_ADMIN_TOKEN}" >> "$GITHUB_ENV"
 
       - name: "[Run] Preview aggregator"
-        if: ${{ inputs.write != true }}
+        if: ${{ inputs.preview == true }}
         run: |
-          python -m app.main --config config/services.yaml --output-dir manifests --source-stage PROD --preview
+          set -euo pipefail
+          ARGS="--config config/services.yaml --output-dir manifests --source-stage PROD --preview"
+          if [[ -n "${{ inputs.inventory_version }}" ]]; then ARGS="$ARGS --override inventory=${{ inputs.inventory_version }}"; fi
+          if [[ -n "${{ inputs.recommendations_version }}" ]]; then ARGS="$ARGS --override recommendations=${{ inputs.recommendations_version }}"; fi
+          if [[ -n "${{ inputs.checkout_version }}" ]]; then ARGS="$ARGS --override checkout=${{ inputs.checkout_version }}"; fi
+          if [[ -n "${{ inputs.web_version }}" ]]; then ARGS="$ARGS --override web=${{ inputs.web_version }}"; fi
+          python -m app.main $ARGS
         working-directory: bookverse-platform
 
       - name: "[Release] Create version and write manifest"
-        if: ${{ inputs.write == true }}
+        if: ${{ inputs.preview != true && inputs.create == true }}
         run: |
-          python -m app.main --config config/services.yaml --output-dir manifests --source-stage PROD
+          set -euo pipefail
+          ARGS="--config config/services.yaml --output-dir manifests --source-stage PROD"
+          if [[ -n "${{ inputs.inventory_version }}" ]]; then ARGS="$ARGS --override inventory=${{ inputs.inventory_version }}"; fi
+          if [[ -n "${{ inputs.recommendations_version }}" ]]; then ARGS="$ARGS --override recommendations=${{ inputs.recommendations_version }}"; fi
+          if [[ -n "${{ inputs.checkout_version }}" ]]; then ARGS="$ARGS --override checkout=${{ inputs.checkout_version }}"; fi
+          if [[ -n "${{ inputs.web_version }}" ]]; then ARGS="$ARGS --override web=${{ inputs.web_version }}"; fi
+          python -m app.main $ARGS
         working-directory: bookverse-platform
 
