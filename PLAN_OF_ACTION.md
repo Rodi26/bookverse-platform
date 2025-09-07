@@ -57,7 +57,7 @@ microservices:
     apptrust_version: 1.8.3
     image:
       registry: evidencetrial.jfrog.io
-      repository: bookverse-inventory-docker-release-local/inventory
+      repository: bookverse-inventory-internal-docker-release-local/inventory
       tag: 1.8.3
       digest: sha256:abc123...
   recommendations:
@@ -65,7 +65,7 @@ microservices:
     apptrust_version: 0.9.0
     image:
       registry: evidencetrial.jfrog.io
-      repository: bookverse-recommendations-docker-release-local/recommendations-api
+      repository: bookverse-recommendations-internal-docker-release-local/recommendations-api
       tag: 0.9.0
       digest: sha256:def456...
   checkout:
@@ -73,7 +73,7 @@ microservices:
     apptrust_version: 0.7.2
     image:
       registry: evidencetrial.jfrog.io
-      repository: bookverse-checkout-docker-release-local/checkout-api
+      repository: bookverse-checkout-internal-docker-release-local/checkout-api
       tag: 0.7.2
       digest: sha256:ghi789...
   web:
@@ -81,7 +81,7 @@ microservices:
     apptrust_version: 0.4.1
     image:
       registry: evidencetrial.jfrog.io
-      repository: bookverse-web-docker-release-local/web
+      repository: bookverse-web-internal-docker-release-local/web
       tag: 0.4.1
       digest: sha256:jkl012...
 provenance:

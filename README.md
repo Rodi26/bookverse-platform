@@ -94,13 +94,13 @@ GitHub variables required:
 
 Internal repositories:
 
-- Docker: `bookverse-platform-docker-internal-local`
-- Python: `bookverse-platform-python-internal-local`
+- Docker: `bookverse-platform-public-docker-nonprod-local`
+- Python: `bookverse-platform-public-python-nonprod-local`
 
 Release repositories:
 
-- Docker: `bookverse-platform-docker-release-local`
-- Python: `bookverse-platform-python-release-local`
+- Docker: `bookverse-platform-public-docker-release-local`
+- Python: `bookverse-platform-public-python-release-local`
 
 ## OIDC application binding (.jfrog/config.yml)
 

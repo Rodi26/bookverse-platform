@@ -83,6 +83,7 @@ jobs:
         env:
           JFROG_URL: ${{ vars.JFROG_URL }}
           JFROG_ADMIN_TOKEN: ${{ secrets.JFROG_ADMIN_TOKEN }}
+          PROJECT_KEY: ${{ vars.PROJECT_KEY }}
         run: |
           python - << 'PY'
           import os, json, urllib.request
@@ -90,8 +91,34 @@ jobs:
           token = os.environ.get("JFROG_ADMIN_TOKEN", "")
           app = "bookverse-platform"
           version = "${{ steps.resolve.outputs.version }}".strip() or os.environ.get("RESOLVED_VERSION", "${{ github.event.inputs.version }}").strip()
-          # Issue release call; platform uses generic release (no repos to include)
-          body = json.dumps({"promotion_type": "move"}).encode('utf-8')
+          # Discover and include only existing public release repositories for platform
+          jf_url = os.environ.get("JFROG_URL", "").rstrip('/')
+          project = os.environ.get("PROJECT_KEY", "bookverse").strip()
+          candidates = [
+            f"{project}-platform-public-docker-release-local",
+            f"{project}-platform-public-python-release-local",
+            f"{project}-platform-public-maven-release-local",
+            f"{project}-platform-public-generic-release-local",
+          ]
+          included = []
+          for key in candidates:
+            try:
+              req = urllib.request.Request(
+                url=f"{jf_url}/artifactory/api/repositories/{key}",
+                headers={"Authorization": f"Bearer {token}", "Accept": "application/json", "X-JFrog-Project": project},
+              )
+              with urllib.request.urlopen(req, timeout=20) as resp:
+                if 200 <= resp.status < 300:
+                  included.append(key)
+            except Exception:
+              pass
+          if not included:
+            # Fallback to docker/python public release repos if discovery failed
+            included = [
+              f"{project}-platform-public-docker-release-local",
+              f"{project}-platform-public-python-release-local",
+            ]
+          body = json.dumps({"promotion_type": "move", "included_repository_keys": included}).encode('utf-8')
           req = urllib.request.Request(
             url=f"{base}/applications/{app}/versions/{version}/release",
             data=body,
