@@ -102,6 +102,23 @@ Release repositories:
 - Docker: `bookverse-platform-docker-release-local`
 - Python: `bookverse-platform-python-release-local`
 
+## OIDC application binding (.jfrog/config.yml)
+
+The file `.jfrog/config.yml` in this repository contains non-sensitive configuration used by the CI workflows to bind artifacts to the correct AppTrust application during an authenticated (OIDC) session.
+
+- The `application.key` in this file is the source of truth for which AppTrust application receives the packages uploaded by the workflows.
+- GitHub Actions authenticates to JFrog using OIDC; during that session, the workflows read `application.key` from `.jfrog/config.yml` so JFrog can attribute uploads to the correct application.
+- This file does not contain secrets and should be committed to the repository. If setup scripts update the application key, commit those changes so workflows behave correctly.
+
+Path: `bookverse-platform/.jfrog/config.yml`
+
+Example structure:
+
+```yaml
+application:
+  key: "<app_key>"
+```
+
 ## Promotion
 
 Use `.github/workflows/promote.yml` selecting QA, STAGING, or PROD. Evidence placeholders can be wired to real gates in a full setup.
