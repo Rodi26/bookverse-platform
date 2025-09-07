@@ -8,11 +8,11 @@ on:
         required: false
         type: string
       target_stage:
-        description: "Target stage (bookverse-DEV, bookverse-QA, bookverse-STAGING)"
+        description: 'Target stage (DEV, QA, STAGING)'
         required: true
         type: choice
-        default: bookverse-STAGING
-        options: [ bookverse-DEV, bookverse-QA, bookverse-STAGING ]
+        default: 'STAGING'
+        options: [ DEV, QA, STAGING ]
 
 jobs:
   promote:
@@ -36,6 +36,7 @@ jobs:
         env:
           JFROG_URL: ${{ vars.JFROG_URL }}
           JFROG_ADMIN_TOKEN: ${{ secrets.JFROG_ADMIN_TOKEN }}
+          PROJECT_KEY: ${{ vars.PROJECT_KEY }}
         run: |
           python - << 'PY'
           import os, sys, json, urllib.request
@@ -46,11 +47,14 @@ jobs:
           app = "bookverse-platform"
           # Resolve inputs
           input_version = os.environ.get("INPUT_VERSION", "${{ github.event.inputs.version }}").strip()
-          target_stage = os.environ.get("INPUT_TARGET_STAGE", "${{ github.event.inputs.target_stage }}").strip()
-          allowed = {"bookverse-DEV", "bookverse-QA", "bookverse-STAGING"}
-          if target_stage not in allowed:
-            print(f"Target stage must be one of {sorted(allowed)}", file=sys.stderr)
+          target_display = os.environ.get("INPUT_TARGET_STAGE", "${{ github.event.inputs.target_stage }}").strip().upper()
+          allowed_display = {"DEV", "QA", "STAGING"}
+          if target_display not in allowed_display:
+            print(f"Target stage must be one of {sorted(allowed_display)}", file=sys.stderr)
             sys.exit(2)
+          # Map display -> API stage (prefix with project key for non‑PROD)
+          project_key = (os.environ.get("PROJECT_KEY", "") or "").strip()
+          api_stage = f"{project_key}-{target_display}" if project_key else target_display
           # Determine version if not provided: latest by created desc
           version = input_version
           if not version:
@@ -80,8 +84,9 @@ jobs:
               f.write(f"RESOLVED_VERSION={version}\n")
               if current_stage:
                 f.write(f"CURRENT_STAGE_BEFORE={current_stage}\n")
+              f.write(f"TARGET_DISPLAY={target_display}\n")
           # Perform promotion
-          body = json.dumps({"target_stage": target_stage}).encode('utf-8')
+          body = json.dumps({"target_stage": api_stage}).encode('utf-8')
           req = urllib.request.Request(
             url=f"{base}/applications/{app}/versions/{version}/promote",
             data=body,
@@ -100,9 +105,14 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
+          PROJECT_KEY='${{ vars.PROJECT_KEY }}'
           CURRENT_DISPLAY="${CURRENT_STAGE_BEFORE:-UNASSIGNED}"
+          # Normalize display: strip project prefix when present
+          if [[ -n "$PROJECT_KEY" && "$CURRENT_DISPLAY" == "$PROJECT_KEY-"* ]]; then
+            CURRENT_DISPLAY="${CURRENT_DISPLAY#${PROJECT_KEY}-}"
+          fi
           CURRENT_DISPLAY="${CURRENT_DISPLAY#bookverse-}"
-          TARGET_DISPLAY="${{ inputs.target_stage }}"
+          TARGET_DISPLAY="${TARGET_DISPLAY:-${{ inputs.target_stage }}}"
           export CURRENT_DISPLAY TARGET_DISPLAY
           STAGES="DEV QA STAGING PROD"
           IFS=' ' read -r -a STAGE_ARR <<< "$STAGES"
