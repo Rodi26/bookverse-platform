@@ -55,6 +55,8 @@ jobs:
           # Map display -> API stage (prefix with project key for non‑PROD)
           project_key = (os.environ.get("PROJECT_KEY", "") or "").strip()
           api_stage = f"{project_key}-{target_display}" if project_key else target_display
+          # Enforce platform visibility policy: platform uses public repos in nonprod
+          # (Release workflow will handle public release repos)
           # Determine version if not provided: latest by created desc
           version = input_version
           if not version:
@@ -85,7 +87,7 @@ jobs:
               if current_stage:
                 f.write(f"CURRENT_STAGE_BEFORE={current_stage}\n")
               f.write(f"TARGET_DISPLAY={target_display}\n")
-          # Perform promotion
+          # Perform promotion (nonprod promotion has no repos to include)
           body = json.dumps({"target_stage": api_stage}).encode('utf-8')
           req = urllib.request.Request(
             url=f"{base}/applications/{app}/versions/{version}/promote",
