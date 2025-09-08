@@ -160,7 +160,16 @@ def compute_next_semver_for_application(client: AppTrustClient, app_key: str) ->
         if parsed is not None:
             return f"{parsed.major}.{parsed.minor}.{parsed.patch + 1}"
 
-    return "1.0.0"
+    # No existing versions; generate a randomized initial SemVer for demo realism
+    # major: 1-5, minor: 1-50, patch: 1-50
+    try:
+        import random
+        major = random.randint(1, 5)
+        minor = random.randint(1, 50)
+        patch = random.randint(1, 50)
+        return f"{major}.{minor}.{patch}"
+    except Exception:
+        return "1.0.0"
 
 
 def pick_latest_prod_version(client: AppTrustClient, app_key: str) -> Optional[str]:
