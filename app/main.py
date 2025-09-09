@@ -211,13 +211,7 @@ TRUSTED = "TRUSTED_RELEASE"
 
 
 def compute_next_semver_for_application(client: AppTrustClient, app_key: str) -> str:
-    """Return next SemVer for the given application by incrementing PATCH.
-
-    Logic mirrors the CI flows used by individual services:
-    - Fetch latest created version
-    - If present and SemVer-compatible, increment the patch component
-    - Otherwise default to 1.0.0
-    """
+    """Return next SemVer: bump patch if any exists; else generate one random initial version."""
     try:
         resp = client.list_application_versions(app_key, limit=1)
         versions = resp.get("versions", []) if isinstance(resp, dict) else []
@@ -225,13 +219,11 @@ def compute_next_semver_for_application(client: AppTrustClient, app_key: str) ->
     except Exception:
         latest = ""
 
-    if latest:
-        parsed = SemVer.parse(latest)
-        if parsed is not None:
-            return f"{parsed.major}.{parsed.minor}.{parsed.patch + 1}"
+    parsed = SemVer.parse(latest) if latest else None
+    if parsed is not None:
+        return f"{parsed.major}.{parsed.minor}.{parsed.patch + 1}"
 
-    # No existing versions; generate a randomized initial SemVer for demo realism
-    # major: 1-5, minor: 1-50, patch: 1-50
+    # No existing versions; generate a randomized initial SemVer (demo realism)
     try:
         import random
         major = random.randint(1, 5)
