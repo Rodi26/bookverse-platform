@@ -226,7 +226,8 @@ def compute_next_semver_for_application(client: AppTrustClient, app_key: str) ->
     if parsed is not None:
         return f"{parsed.major}.{parsed.minor}.{parsed.patch + 1}"
 
-    # No existing versions; generate a randomized initial SemVer (demo realism)
+    # No existing versions; generate a randomized initial SemVer for demo realism
+    # major: 1-5, minor: 1-50, patch: 1-50
     try:
         import random
         major = random.randint(1, 5)
