@@ -158,15 +158,18 @@ class AppTrustClientCLI:
 
     def _run_jf(self, method: str, path: str, body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         AppTrustClientCLI._ensure_cli_available()
-        # Build absolute URL when only a path is provided, using the configured base URL
-        url = path
-        if not (path.startswith("http://") or path.startswith("https://")):
-            base = (self.base_url or "").rstrip("/")
-            if base:
-                if not path.startswith("/"):
-                    path = "/" + path
-                url = f"{base}{path}"
-        args: List[str] = ["jf", "rt", "curl", "-X", method.upper(), url]
+        # Build URI path for jf rt curl (must not include scheme/host)
+        uri = path
+        if path.startswith("http://") or path.startswith("https://"):
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(path)
+                uri = (parsed.path or "/") + (f"?{parsed.query}" if parsed.query else "")
+            except Exception:
+                uri = path
+        elif not path.startswith("/"):
+            uri = "/" + path
+        args: List[str] = ["jf", "rt", "curl", "-X", method.upper(), uri]
         # Ensure Authorization header is present for AppTrust API calls
         token = os.environ.get("APPTRUST_ACCESS_TOKEN", "").strip()
         if token:
@@ -188,15 +191,15 @@ class AppTrustClientCLI:
             return {"raw": raw}
 
     def list_application_versions(self, app_key: str, limit: int = 200) -> Dict[str, Any]:
-        path = f"/applications/{urllib.parse.quote(app_key)}/versions"
+        path = f"/apptrust/api/v1/applications/{urllib.parse.quote(app_key)}/versions"
         return self._run_jf("GET", path + f"?limit={limit}&order_by=created&order_asc=false")
 
     def get_version_content(self, app_key: str, version: str) -> Dict[str, Any]:
-        path = f"/applications/{urllib.parse.quote(app_key)}/versions/{urllib.parse.quote(version)}/content"
+        path = f"/apptrust/api/v1/applications/{urllib.parse.quote(app_key)}/versions/{urllib.parse.quote(version)}/content"
         return self._run_jf("GET", path)
 
     def create_platform_version(self, platform_app_key: str, version: str, sources_versions: List[Dict[str, str]]) -> Dict[str, Any]:
-        path = f"/applications/{urllib.parse.quote(platform_app_key)}/versions"
+        path = f"/apptrust/api/v1/applications/{urllib.parse.quote(platform_app_key)}/versions"
         body = {
             "version": version,
             "sources": {
