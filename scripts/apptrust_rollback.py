@@ -183,14 +183,21 @@ def main() -> int:
     p = argparse.ArgumentParser(description="AppTrust PROD rollback utility (platform)")
     p.add_argument("--app", default="bookverse-platform", help="Application key")
     p.add_argument("--version", required=True, help="Target version to rollback (SemVer)")
-    # OIDC-only path: no base-url or token arguments
     args = p.parse_args()
 
+    base_url = _env("APPTRUST_BASE_URL")
+    access_token = _env("APPTRUST_ACCESS_TOKEN")
+
+    # Prefer token-based HTTP client when explicit env is provided; otherwise use OIDC CLI
     try:
-        client = AppTrustClientCLI()
+        if base_url and access_token:
+            client = AppTrustClient(base_url=base_url, token=access_token)
+        else:
+            client = AppTrustClientCLI()
     except Exception as e:
-        print(f"OIDC (CLI) auth not available: {e}", file=sys.stderr)
+        print(f"Auth/client initialization failed: {e}", file=sys.stderr)
         return 2
+
     try:
         start = time.time()
         rollback_in_prod(client, args.app, args.version)
@@ -199,7 +206,6 @@ def main() -> int:
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
-
 
 if __name__ == "__main__":
     raise SystemExit(main())
