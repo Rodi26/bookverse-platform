@@ -2,7 +2,7 @@ services:
   - name: inventory
     apptrust_application: bookverse-inventory
     docker:
-      registry: evidencetrial.jfrog.io
+      registry: apptrustswampupc.jfrog.io
       repository: bookverse-inventory-internal-docker-release-local/inventory
     simulated_version: 1.8.3
     simulated_digest: sha256:abc123
@@ -10,7 +10,7 @@ services:
   - name: recommendations
     apptrust_application: bookverse-recommendations
     docker:
-      registry: evidencetrial.jfrog.io
+      registry: apptrustswampupc.jfrog.io
       repository: bookverse-recommendations-internal-docker-release-local/recommendations-api
     simulated_version: 0.9.0
     simulated_digest: sha256:def456
@@ -18,7 +18,7 @@ services:
   - name: checkout
     apptrust_application: bookverse-checkout
     docker:
-      registry: evidencetrial.jfrog.io
+      registry: apptrustswampupc.jfrog.io
       repository: bookverse-checkout-internal-docker-release-local/checkout-api
     simulated_version: 0.7.2
     simulated_digest: sha256:ghi789
@@ -26,7 +26,7 @@ services:
   - name: web
     apptrust_application: bookverse-web
     docker:
-      registry: evidencetrial.jfrog.io
+      registry: apptrustswampupc.jfrog.io
       repository: bookverse-web-internal-docker-release-local/web
     simulated_version: 0.4.1
     simulated_digest: sha256:jkl012

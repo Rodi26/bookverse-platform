@@ -56,7 +56,7 @@ microservices:
     apptrust_application: bookverse-inventory
     apptrust_version: 1.8.3
     image:
-      registry: evidencetrial.jfrog.io
+      registry: apptrustswampupc.jfrog.io
       repository: bookverse-inventory-internal-docker-release-local/inventory
       tag: 1.8.3
       digest: sha256:abc123...
@@ -64,7 +64,7 @@ microservices:
     apptrust_application: bookverse-recommendations
     apptrust_version: 0.9.0
     image:
-      registry: evidencetrial.jfrog.io
+      registry: apptrustswampupc.jfrog.io
       repository: bookverse-recommendations-internal-docker-release-local/recommendations-api
       tag: 0.9.0
       digest: sha256:def456...
@@ -72,7 +72,7 @@ microservices:
     apptrust_application: bookverse-checkout
     apptrust_version: 0.7.2
     image:
-      registry: evidencetrial.jfrog.io
+      registry: apptrustswampupc.jfrog.io
       repository: bookverse-checkout-internal-docker-release-local/checkout-api
       tag: 0.7.2
       digest: sha256:ghi789...
@@ -80,7 +80,7 @@ microservices:
     apptrust_application: bookverse-web
     apptrust_version: 0.4.1
     image:
-      registry: evidencetrial.jfrog.io
+      registry: apptrustswampupc.jfrog.io
       repository: bookverse-web-internal-docker-release-local/web
       tag: 0.4.1
       digest: sha256:jkl012...
