@@ -166,7 +166,7 @@ class AppTrustClientCLI:
                 if not path.startswith("/"):
                     path = "/" + path
                 url = f"{base}{path}"
-        args: List[str] = ["jf", "curl", "-X", method.upper(), url]
+        args: List[str] = ["jf", "rt", "curl", "-X", method.upper(), url]
         # Ensure Authorization header is present for AppTrust API calls
         token = os.environ.get("APPTRUST_ACCESS_TOKEN", "").strip()
         if token:
