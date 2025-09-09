@@ -167,12 +167,18 @@ class AppTrustClientCLI:
                     path = "/" + path
                 url = f"{base}{path}"
         args: List[str] = ["jf", "curl", "-X", method.upper(), url]
+        # Ensure Authorization header is present for AppTrust API calls
+        token = os.environ.get("APPTRUST_ACCESS_TOKEN", "").strip()
+        if token:
+            args += ["-H", f"Authorization: Bearer {token}"]
         if body is not None:
             args += ["-H", "Content-Type: application/json", "-d", json.dumps(body)]
         try:
             proc = subprocess.run(args, check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"jf curl failed: {e.stderr.strip() or e}")
+            # Include stdout snippet for better diagnostics if stderr is empty
+            err = e.stderr.strip() or e.stdout.strip() or str(e)
+            raise RuntimeError(f"jf curl failed: {err}")
         raw = (proc.stdout or "").strip()
         if not raw:
             return {}
