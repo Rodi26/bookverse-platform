@@ -130,12 +130,19 @@ jobs:
           PY
 
       - name: "[Helm] Pin version"
+        if: ${{ false }} # Disabled: using webhook-based dispatch from platform-webhook adapter
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository_owner }}/bookverse-helm
           event-type: platform_release
           client-payload: '{"platform_version": "${{ steps.resolve.outputs.version }}"}'
+
+      - name: "[Helm] Skipping repo dispatch (handled by webhook)"
+        run: |
+          echo "Repository dispatch is disabled in this workflow."
+          echo "A webhook will trigger the platform-webhook adapter, which will dispatch 'platform_release'/'platform_release_completed' to bookverse-helm."
+          echo "Resolved version: ${{ steps.resolve.outputs.version }}"
 
       - name: "[Summary] Release"
         run: |

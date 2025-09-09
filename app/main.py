@@ -2,6 +2,8 @@ import argparse
 import datetime as dt
 import json
 import os
+import shutil
+import subprocess
 import re
 import urllib.parse
 import urllib.request
@@ -134,6 +136,54 @@ class AppTrustClient:
             },
         }
         return self._request("POST", path, body=body)
+
+
+class AppTrustClientCLI:
+    """AppTrust client backed by JFrog CLI (OIDC-enabled)."""
+
+    def __init__(self, timeout_seconds: int = 30) -> None:
+        self.timeout_seconds = timeout_seconds
+
+    @staticmethod
+    def _ensure_cli_available() -> None:
+        if shutil.which("jf") is None:
+            raise RuntimeError("JFrog CLI (jf) not found on PATH. Install/configure it for OIDC.")
+
+    @staticmethod
+    def _run_jf(method: str, path: str, body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        AppTrustClientCLI._ensure_cli_available()
+        args: List[str] = ["jf", "curl", "-X", method.upper(), path]
+        if body is not None:
+            args += ["-H", "Content-Type: application/json", "-d", json.dumps(body)]
+        try:
+            proc = subprocess.run(args, check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"jf curl failed: {e.stderr.strip() or e}")
+        raw = (proc.stdout or "").strip()
+        if not raw:
+            return {}
+        try:
+            return json.loads(raw)
+        except Exception:
+            return {"raw": raw}
+
+    def list_application_versions(self, app_key: str, limit: int = 200) -> Dict[str, Any]:
+        path = f"/apptrust/api/v1/applications/{urllib.parse.quote(app_key)}/versions"
+        return self._run_jf("GET", path + f"?limit={limit}&order_by=created&order_asc=false")
+
+    def get_version_content(self, app_key: str, version: str) -> Dict[str, Any]:
+        path = f"/apptrust/api/v1/applications/{urllib.parse.quote(app_key)}/versions/{urllib.parse.quote(version)}/content"
+        return self._run_jf("GET", path)
+
+    def create_platform_version(self, platform_app_key: str, version: str, sources_versions: List[Dict[str, str]]) -> Dict[str, Any]:
+        path = f"/apptrust/api/v1/applications/{urllib.parse.quote(platform_app_key)}/versions"
+        body = {
+            "version": version,
+            "sources": {
+                "versions": sources_versions,
+            },
+        }
+        return self._run_jf("POST", path, body=body)
 
 
 RELEASED = "RELEASED"
@@ -326,12 +376,11 @@ def main() -> int:
 
     services_cfg = load_services_config(config_path)
 
-    base_url = os.environ.get("APPTRUST_BASE_URL")
-    token = os.environ.get("APPTRUST_ACCESS_TOKEN")
-    if not base_url or not token:
-        print("Missing APPTRUST_BASE_URL or APPTRUST_ACCESS_TOKEN (live mode only)", flush=True)
+    try:
+        client = AppTrustClientCLI()
+    except Exception as e:
+        print(f"OIDC (CLI) auth not available: {e}", flush=True)
         return 2
-    client = AppTrustClient(base_url=base_url, token=token)
     services = resolve_promoted_versions(services_cfg, client)
     # Apply overrides if provided
     overrides: Dict[str, str] = {}

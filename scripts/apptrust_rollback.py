@@ -8,6 +8,8 @@ Local copy of AppTrust rollback utility (sourced from inventory service).
 import argparse
 import json
 import os
+import shutil
+import subprocess
 import re
 import sys
 import time
@@ -117,6 +119,48 @@ class AppTrustClient:
         return self._request("POST", path, body={"from_stage": from_stage})
 
 
+class AppTrustClientCLI:
+    """AppTrust client backed by JFrog CLI (OIDC-enabled).
+
+    Requires `jf` on PATH and a configured server context (e.g., via
+    `jf c add --interactive=false --url "$JFROG_URL" --access-token ""`).
+    """
+
+    def __init__(self, timeout_seconds: int = 30) -> None:
+        self.timeout_seconds = timeout_seconds
+
+    @staticmethod
+    def _ensure_cli_available() -> None:
+        if shutil.which("jf") is None:
+            raise RuntimeError("JFrog CLI (jf) not found on PATH. Install/configure it for OIDC.")
+
+    @staticmethod
+    def _run_jf(method: str, path: str, body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        AppTrustClientCLI._ensure_cli_available()
+        args: List[str] = ["jf", "curl", "-X", method.upper(), path]
+        if body is not None:
+            args += ["-H", "Content-Type: application/json", "-d", json.dumps(body)]
+        try:
+            proc = subprocess.run(args, check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"jf curl failed: {e.stderr.strip() or e}")
+        raw = (proc.stdout or "").strip()
+        if not raw:
+            return {}
+        try:
+            return json.loads(raw)
+        except Exception:
+            return {"raw": raw}
+
+    def get_version_content(self, app_key: str, version: str) -> Dict[str, Any]:
+        path = f"/apptrust/api/v1/applications/{urllib.parse.quote(app_key)}/versions/{urllib.parse.quote(version)}/content"
+        return self._run_jf("GET", path)
+
+    def rollback_application_version(self, app_key: str, version: str, from_stage: str) -> Dict[str, Any]:
+        path = f"/apptrust/api/v1/applications/{urllib.parse.quote(app_key)}/versions/{urllib.parse.quote(version)}/rollback"
+        return self._run_jf("POST", path, body={"from_stage": from_stage})
+
+
 def rollback_in_prod(client: AppTrustClient, app_key: str, target_version: str) -> None:
     content = client.get_version_content(app_key, target_version)
     from_stage = str(content.get("current_stage") or "").strip()
@@ -139,18 +183,14 @@ def main() -> int:
     p = argparse.ArgumentParser(description="AppTrust PROD rollback utility (platform)")
     p.add_argument("--app", default="bookverse-platform", help="Application key")
     p.add_argument("--version", required=True, help="Target version to rollback (SemVer)")
-    p.add_argument("--base-url", default=_env("APPTRUST_BASE_URL"), help="Base API URL (env: APPTRUST_BASE_URL)")
-    p.add_argument("--token", default=_env("APPTRUST_ACCESS_TOKEN"), help="Access token (env: APPTRUST_ACCESS_TOKEN)")
+    # OIDC-only path: no base-url or token arguments
     args = p.parse_args()
 
-    if not args.base_url:
-        print("Missing --base-url or APPTRUST_BASE_URL", file=sys.stderr)
+    try:
+        client = AppTrustClientCLI()
+    except Exception as e:
+        print(f"OIDC (CLI) auth not available: {e}", file=sys.stderr)
         return 2
-    if not args.token:
-        print("Missing --token or APPTRUST_ACCESS_TOKEN", file=sys.stderr)
-        return 2
-
-    client = AppTrustClient(args.base_url, args.token)
     try:
         start = time.time()
         rollback_in_prod(client, args.app, args.version)
