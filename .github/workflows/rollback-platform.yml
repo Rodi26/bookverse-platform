@@ -40,6 +40,23 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
+      - name: Setup JFrog CLI
+        # uses: jfrog/setup-jfrog-cli@v4
+        uses: EyalDelarea/setup-jfrog-cli@swampUpAppTrust
+
+      - name: "[Configure] JFrog server (OIDC)"
+        run: |
+          jf c add --interactive=false --url "${{ vars.JFROG_URL }}" --access-token ""
+
+      - name: "[Preflight] Validate environment"
+        run: |
+          which jf
+          jf -v || true
+          python -V
+          ls -la
+          test -f scripts/apptrust_rollback.py
+          echo "OK: preflight"
+
       - name: "[Resolve] Target version"
         shell: bash
         run: |
@@ -71,9 +88,8 @@ jobs:
 
       - name: "[Rollback] Execute"
         if: ${{ inputs.dry_run != true }}
-        working-directory: bookverse-platform
         run: |
-          python scripts/apptrust_rollback.py --version "${TARGET_VERSION}" --base-url "$APPTRUST_BASE_URL" --token "$APPTRUST_ACCESS_TOKEN"
+          python scripts/apptrust_rollback.py --version "${TARGET_VERSION}"
 
       - name: "[Tags] Enforce PROD 'latest' invariants"
         if: ${{ inputs.dry_run != true }}
