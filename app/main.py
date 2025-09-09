@@ -248,7 +248,11 @@ def pick_latest_prod_version(client: AppTrustClient, app_key: str) -> Optional[s
     return ordered[0] if ordered else None
 
 
-def resolve_promoted_versions(services_cfg: List[Dict[str, Any]], client: AppTrustClient) -> List[Dict[str, Any]]:
+def resolve_promoted_versions(
+    services_cfg: List[Dict[str, Any]],
+    client: AppTrustClient,
+    override_versions: Optional[Dict[str, str]] = None,
+) -> List[Dict[str, Any]]:
     """Resolve latest promoted (PROD) version per configured application.
 
     Returns list entries with: name, apptrust_application, resolved_version.
@@ -259,14 +263,19 @@ def resolve_promoted_versions(services_cfg: List[Dict[str, Any]], client: AppTru
         app_key = s.get("apptrust_application")
         if not name or not app_key:
             raise ValueError(f"Service config missing required fields: {s}")
-        latest = pick_latest_prod_version(client, app_key)
-        if not latest:
-            raise RuntimeError(f"No PROD version found for application {app_key}")
+        # If an override was provided for this service, prefer it and skip PROD lookup
+        if override_versions and name in override_versions:
+            resolved_version = override_versions[name]
+        else:
+            latest = pick_latest_prod_version(client, app_key)
+            if not latest:
+                raise RuntimeError(f"No PROD version found for application {app_key}")
+            resolved_version = latest
         resolved.append(
             {
                 "name": name,
                 "apptrust_application": app_key,
-                "resolved_version": latest,
+                "resolved_version": resolved_version,
             }
         )
     return resolved
@@ -391,13 +400,7 @@ def main() -> int:
 
     services_cfg = load_services_config(config_path)
 
-    try:
-        client = AppTrustClientCLI()
-    except Exception as e:
-        print(f"OIDC (CLI) auth not available: {e}", flush=True)
-        return 2
-    services = resolve_promoted_versions(services_cfg, client)
-    # Apply overrides if provided
+    # Parse overrides early so we can bypass PROD lookup for specified services
     overrides: Dict[str, str] = {}
     for ov in getattr(args, "override", []) or []:
         if "=" not in ov:
@@ -410,11 +413,13 @@ def main() -> int:
             print(f"Ignoring malformed override: {ov}")
             continue
         overrides[svc] = ver
-    if overrides:
-        for s in services:
-            name = s.get("name")
-            if name in overrides:
-                s["resolved_version"] = overrides[name]
+
+    try:
+        client = AppTrustClientCLI()
+    except Exception as e:
+        print(f"OIDC (CLI) auth not available: {e}", flush=True)
+        return 2
+    services = resolve_promoted_versions(services_cfg, client, overrides or None)
 
     manifest = build_manifest(services, client, source_stage)
 
