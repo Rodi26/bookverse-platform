@@ -158,18 +158,15 @@ class AppTrustClientCLI:
 
     def _run_jf(self, method: str, path: str, body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         AppTrustClientCLI._ensure_cli_available()
-        # Build URI path for jf rt curl (must not include scheme/host)
-        uri = path
-        if path.startswith("http://") or path.startswith("https://"):
-            try:
-                from urllib.parse import urlparse
-                parsed = urlparse(path)
-                uri = (parsed.path or "/") + (f"?{parsed.query}" if parsed.query else "")
-            except Exception:
-                uri = path
-        elif not path.startswith("/"):
-            uri = "/" + path
-        args: List[str] = ["jf", "rt", "curl", "-X", method.upper(), uri]
+        # Build absolute URL for jf curl (platform-wide curl, not Artifactory-scoped)
+        url = path
+        if not (path.startswith("http://") or path.startswith("https://")):
+            base = (self.base_url or "").rstrip("/")
+            if base:
+                if not path.startswith("/"):
+                    path = "/" + path
+                url = f"{base}{path}"
+        args: List[str] = ["jf", "curl", "-X", method.upper(), url]
         # Ensure Authorization header is present for AppTrust API calls
         token = os.environ.get("APPTRUST_ACCESS_TOKEN", "").strip()
         if token:
