@@ -66,6 +66,16 @@ jobs:
           echo "APPTRUST_BASE_URL=${BASE}/apptrust/api/v1" >> "$GITHUB_ENV"
           echo "APPTRUST_ACCESS_TOKEN=${JFROG_ADMIN_TOKEN}" >> "$GITHUB_ENV"
 
+      - name: "[Setup] JFrog CLI"
+        uses: jfrog/setup-jfrog-cli@v4
+        with:
+          version: latest
+
+      - name: "[Setup] Configure JFrog CLI"
+        run: |
+          jf c add --interactive=false --url "$JFROG_URL" --access-token "$JFROG_ADMIN_TOKEN"
+          jf c show
+
       - name: "[Run] Preview aggregator"
         if: ${{ inputs.preview == true }}
         run: |
