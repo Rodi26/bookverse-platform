@@ -170,7 +170,7 @@ def aggregate_platform_release(stage: str = "PROD", constraints: Constraints) ->
 
 ## Webhook-driven Helm Pinning (Planned)
 
-- Trigger: AppTrust `release_completed` for `bookverse-platform` to PROD.
+- Trigger: AppTrust `release_completed` for `bookverse-platform` (release events are PROD by definition).
 - JFrog Webhook:
   - Endpoint: `https://api.github.com/repos/yonatanp-jfrog/bookverse-helm/dispatches`
   - Method: `POST`
@@ -191,7 +191,13 @@ def aggregate_platform_release(stage: str = "PROD", constraints: Constraints) ->
   - Resolves components from AppTrust for that platform version.
   - Pins `platform.version` and per-service `tag` across `values-*.yaml`.
   - Commits and packages the chart.
-- Security: prefer fine-grained PAT limited to `bookverse-helm` (contents:write). Future: GitHub App.
+- Security: use a fine-grained Personal Access Token (PAT) limited to `bookverse-helm` with Contents: Read & Write (Option A for the demo). Future: GitHub App.
+- PAT handling:
+  - Create the PAT manually in GitHub (cannot be automated by script).
+  - Scope: repository access only to `bookverse-helm`.
+  - Permissions: Contents (Read and write). Add Actions (Read and write) only if required by the workflow.
+  - Provide the PAT to the platform init process via environment variable and store it as a Kubernetes Secret for the `bookverse-platform` service.
+  - The init script validates the PAT by attempting a `repository_dispatch` dry-run (expect HTTP 204).
 - Manual dry-run: send the same `repository_dispatch` via curl to validate end-to-end before enabling webhook.
 
 ## Failure Modes and Idempotency

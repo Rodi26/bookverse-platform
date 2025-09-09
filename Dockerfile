@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY config ./config
 
+# Default to aggregator CLI; webhook adapter is optional and not used in the direct JFrog→GitHub path
 ENTRYPOINT ["python", "-m", "app.main"]
 CMD ["--config", "/app/config/services.yaml", "--output-dir", "/app/manifests", "--source-stage", "PROD", "--preview"]
 
