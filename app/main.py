@@ -182,15 +182,15 @@ class AppTrustClientCLI:
             return {"raw": raw}
 
     def list_application_versions(self, app_key: str, limit: int = 200) -> Dict[str, Any]:
-        path = f"/apptrust/api/v1/applications/{urllib.parse.quote(app_key)}/versions"
+        path = f"/applications/{urllib.parse.quote(app_key)}/versions"
         return self._run_jf("GET", path + f"?limit={limit}&order_by=created&order_asc=false")
 
     def get_version_content(self, app_key: str, version: str) -> Dict[str, Any]:
-        path = f"/apptrust/api/v1/applications/{urllib.parse.quote(app_key)}/versions/{urllib.parse.quote(version)}/content"
+        path = f"/applications/{urllib.parse.quote(app_key)}/versions/{urllib.parse.quote(version)}/content"
         return self._run_jf("GET", path)
 
     def create_platform_version(self, platform_app_key: str, version: str, sources_versions: List[Dict[str, str]]) -> Dict[str, Any]:
-        path = f"/apptrust/api/v1/applications/{urllib.parse.quote(platform_app_key)}/versions"
+        path = f"/applications/{urllib.parse.quote(platform_app_key)}/versions"
         body = {
             "version": version,
             "sources": {
