@@ -143,16 +143,30 @@ class AppTrustClientCLI:
 
     def __init__(self, timeout_seconds: int = 30) -> None:
         self.timeout_seconds = timeout_seconds
+        # Prefer explicit base URL provided by workflow env; fall back to JFROG_URL
+        base_from_env = os.environ.get("APPTRUST_BASE_URL", "").rstrip("/")
+        if base_from_env:
+            self.base_url = base_from_env
+        else:
+            jfrog_url = os.environ.get("JFROG_URL", "").rstrip("/")
+            self.base_url = f"{jfrog_url}/apptrust/api/v1" if jfrog_url else ""
 
     @staticmethod
     def _ensure_cli_available() -> None:
         if shutil.which("jf") is None:
             raise RuntimeError("JFrog CLI (jf) not found on PATH. Install/configure it for OIDC.")
 
-    @staticmethod
-    def _run_jf(method: str, path: str, body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _run_jf(self, method: str, path: str, body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         AppTrustClientCLI._ensure_cli_available()
-        args: List[str] = ["jf", "curl", "-X", method.upper(), path]
+        # Build absolute URL when only a path is provided, using the configured base URL
+        url = path
+        if not (path.startswith("http://") or path.startswith("https://")):
+            base = (self.base_url or "").rstrip("/")
+            if base:
+                if not path.startswith("/"):
+                    path = "/" + path
+                url = f"{base}{path}"
+        args: List[str] = ["jf", "curl", "-X", method.upper(), url]
         if body is not None:
             args += ["-H", "Content-Type: application/json", "-d", json.dumps(body)]
         try:
