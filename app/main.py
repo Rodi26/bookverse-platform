@@ -158,15 +158,18 @@ class AppTrustClientCLI:
 
     def _run_jf(self, method: str, path: str, body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         AppTrustClientCLI._ensure_cli_available()
-        # Build absolute URL for jf curl (platform-wide curl, not Artifactory-scoped)
-        url = path
-        if not (path.startswith("http://") or path.startswith("https://")):
-            base = (self.base_url or "").rstrip("/")
-            if base:
-                if not path.startswith("/"):
-                    path = "/" + path
-                url = f"{base}{path}"
-        args: List[str] = ["jf", "curl", "-X", method.upper(), url]
+        # Build URI path for jf rt curl (must not include scheme/host)
+        uri = path
+        if path.startswith("http://") or path.startswith("https://"):
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(path)
+                uri = (parsed.path or "/") + (f"?{parsed.query}" if parsed.query else "")
+            except Exception:
+                uri = path
+        elif not path.startswith("/"):
+            uri = "/" + path
+        args: List[str] = ["jf", "rt", "curl", "-X", method.upper(), uri]
         # Ensure Authorization header is present for AppTrust API calls
         token = os.environ.get("APPTRUST_ACCESS_TOKEN", "").strip()
         if token:
@@ -463,10 +466,16 @@ def main() -> int:
             continue
         overrides[svc] = ver
 
+    # Prefer direct HTTP client when explicit APPTRUST env is provided; otherwise use OIDC CLI.
     try:
-        client = AppTrustClientCLI()
+        base_url = os.environ.get("APPTRUST_BASE_URL", "").strip()
+        token = os.environ.get("APPTRUST_ACCESS_TOKEN", "").strip()
+        if base_url and token:
+            client = AppTrustClient(base_url=base_url, token=token)
+        else:
+            client = AppTrustClientCLI()
     except Exception as e:
-        print(f"OIDC (CLI) auth not available: {e}", flush=True)
+        print(f"Auth/client initialization failed: {e}", flush=True)
         return 2
     services, missing = resolve_promoted_versions(services_cfg, client, overrides or None)
 
