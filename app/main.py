@@ -210,7 +210,7 @@ class AppTrustClientCLI:
 
 
 RELEASED = "RELEASED"
-TRUSTED = "TRUSTED_RELEASE"
+TRUSTED_RELEASE = "TRUSTED_RELEASE"
 
 
 def compute_next_semver_for_application(client: AppTrustClient, app_key: str) -> str:
@@ -238,15 +238,12 @@ def compute_next_semver_for_application(client: AppTrustClient, app_key: str) ->
 
 
 def pick_latest_prod_version(client: AppTrustClient, app_key: str) -> Optional[str]:
-    """Pick the latest SemVer among versions that are actually in PROD.
+    """Pick the latest SemVer among versions with release_status ∈ {RELEASED, TRUSTED_RELEASE}.
 
     Strategy:
     - Read the list of versions (created desc ordering).
-    - Prefer entries that already include both release_status ∈ {RELEASED, TRUSTED_RELEASE}
-      and current_stage == PROD.
-    - If current_stage is missing or no candidates found, fetch Get Content for the most
-      recent versions and filter using the authoritative fields.
-    - Return the highest SemVer among the PROD candidates.
+    - Keep only entries that already include a qualifying release_status.
+    - Return the highest SemVer among the qualified candidates; prefer 'latest' tag if present.
     """
     resp = client.list_application_versions(app_key)
     versions_raw = resp.get("versions", []) if isinstance(resp, dict) else []
@@ -268,41 +265,22 @@ def pick_latest_prod_version(client: AppTrustClient, app_key: str) -> Optional[s
             "current_stage": stage,
         })
 
-    # First, use any entries that already indicate PROD
+    # First, use any entries that already indicate a qualifying release_status
     prod_candidates_full: List[Dict[str, Any]] = [
-        n for n in normalized if n.get("release_status") in (RELEASED, TRUSTED) and n.get("current_stage") == "PROD"
+        n for n in normalized if n.get("release_status") in (RELEASED, TRUSTED_RELEASE)
     ]
     prod_candidates: List[str] = [n["version"] for n in prod_candidates_full]
 
-    # If none, fall back to probing recent versions via Get Content
+    # Do not probe content: if none are qualifying, return None to signal no aggregatable version
     if not prod_candidates:
-        to_probe = normalized[: min(50, len(normalized))]
-        probed_prod_full: List[Dict[str, Any]] = []
-        for n in to_probe:
-            try:
-                content = client.get_version_content(app_key, n["version"]) or {}
-            except Exception:
-                continue
-            rs = str(content.get("release_status", "") or n.get("release_status", "")).upper().strip()
-            stage = str(content.get("current_stage", "")).upper().strip()
-            if rs in (RELEASED, TRUSTED) and stage == "PROD":
-                # Preserve original tag if present in list response
-                probed_prod_full.append({
-                    "version": n["version"],
-                    "tag": n.get("tag", ""),
-                })
-        prod_candidates_full = probed_prod_full
-        prod_candidates = [n["version"] for n in prod_candidates_full]
+        return None
 
     if not prod_candidates:
         return None
 
     # Prefer an entry explicitly tagged as 'latest' if present among PROD
     try:
-        latest_tagged = next(
-            (n for n in prod_candidates_full if str(n.get("tag", "")).strip().lower() == "latest"),
-            None,
-        )
+        latest_tagged = next((n for n in prod_candidates_full if str(n.get("tag", "")).strip().lower() == "latest"), None)
         if latest_tagged:
             return latest_tagged["version"]
     except Exception:
@@ -316,33 +294,43 @@ def resolve_promoted_versions(
     services_cfg: List[Dict[str, Any]],
     client: AppTrustClient,
     override_versions: Optional[Dict[str, str]] = None,
-) -> List[Dict[str, Any]]:
-    """Resolve latest promoted (PROD) version per configured application.
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Resolve latest version per application, filtered by release_status only.
 
-    Returns list entries with: name, apptrust_application, resolved_version.
+    Returns a tuple:
+      - resolved: list of entries with (name, apptrust_application, resolved_version)
+      - missing: list of entries with (name, apptrust_application) that had no eligible version
     """
     resolved: List[Dict[str, Any]] = []
+    missing: List[Dict[str, Any]] = []
     for s in services_cfg:
         name = s.get("name")
         app_key = s.get("apptrust_application")
         if not name or not app_key:
             raise ValueError(f"Service config missing required fields: {s}")
-        # If an override was provided for this service, prefer it and skip PROD lookup
+        # If an override was provided for this service, prefer it and skip lookup
         if override_versions and name in override_versions:
             resolved_version = override_versions[name]
-        else:
-            latest = pick_latest_prod_version(client, app_key)
-            if not latest:
-                raise RuntimeError(f"No PROD version found for application {app_key}")
-            resolved_version = latest
-        resolved.append(
-            {
+            resolved.append({
                 "name": name,
                 "apptrust_application": app_key,
                 "resolved_version": resolved_version,
-            }
-        )
-    return resolved
+            })
+            continue
+
+        latest = pick_latest_prod_version(client, app_key)
+        if not latest:
+            missing.append({
+                "name": name,
+                "apptrust_application": app_key,
+            })
+            continue
+        resolved.append({
+            "name": name,
+            "apptrust_application": app_key,
+            "resolved_version": latest,
+        })
+    return resolved, missing
 
 
 def build_manifest(applications: List[Dict[str, Any]], client: AppTrustClient, source_stage: str) -> Dict[str, Any]:
@@ -483,7 +471,28 @@ def main() -> int:
     except Exception as e:
         print(f"OIDC (CLI) auth not available: {e}", flush=True)
         return 2
-    services = resolve_promoted_versions(services_cfg, client, overrides or None)
+    services, missing = resolve_promoted_versions(services_cfg, client, overrides or None)
+
+    # If nothing to aggregate (no eligible RELEASED/TRUSTED_RELEASE versions and no overrides), exit gracefully
+    if not services:
+        summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+        message = (
+            "No aggregatable application versions were found (release_status not in {RELEASED, TRUSTED_RELEASE}).\n"
+        )
+        if missing:
+            try:
+                names = ", ".join(sorted([m.get("apptrust_application", "") or m.get("name", "") for m in missing]))
+                message += f"Missing: {names}\n"
+            except Exception:
+                pass
+        print(message.strip())
+        if summary_path:
+            try:
+                with open(summary_path, "a", encoding="utf-8") as f:
+                    f.write("\n" + message + "\n")
+            except Exception:
+                pass
+        return 0
 
     manifest = build_manifest(services, client, source_stage)
 
