@@ -238,13 +238,77 @@ def compute_next_semver_for_application(client: AppTrustClient, app_key: str) ->
 
 
 def pick_latest_prod_version(client: AppTrustClient, app_key: str) -> Optional[str]:
+    """Pick the latest SemVer among versions that are actually in PROD.
+
+    Strategy:
+    - Read the list of versions (created desc ordering).
+    - Prefer entries that already include both release_status ∈ {RELEASED, TRUSTED_RELEASE}
+      and current_stage == PROD.
+    - If current_stage is missing or no candidates found, fetch Get Content for the most
+      recent versions and filter using the authoritative fields.
+    - Return the highest SemVer among the PROD candidates.
+    """
     resp = client.list_application_versions(app_key)
-    versions = resp.get("versions", [])
-    prod = [str(v.get("version", "")) for v in versions if str(v.get("release_status", "")).upper() in (RELEASED, TRUSTED)]
-    prod = [v for v in prod if v]
-    if not prod:
+    versions_raw = resp.get("versions", []) if isinstance(resp, dict) else []
+
+    normalized: List[Dict[str, Any]] = []
+    for v in versions_raw:
+        if not isinstance(v, dict):
+            continue
+        ver = str(v.get("version", "")).strip()
+        if not ver:
+            continue
+        rs = str(v.get("release_status", "")).upper().strip()
+        tag = str(v.get("tag", "")).strip()
+        stage = str(v.get("current_stage", "")).upper().strip()
+        normalized.append({
+            "version": ver,
+            "release_status": rs,
+            "tag": tag,
+            "current_stage": stage,
+        })
+
+    # First, use any entries that already indicate PROD
+    prod_candidates_full: List[Dict[str, Any]] = [
+        n for n in normalized if n.get("release_status") in (RELEASED, TRUSTED) and n.get("current_stage") == "PROD"
+    ]
+    prod_candidates: List[str] = [n["version"] for n in prod_candidates_full]
+
+    # If none, fall back to probing recent versions via Get Content
+    if not prod_candidates:
+        to_probe = normalized[: min(50, len(normalized))]
+        probed_prod_full: List[Dict[str, Any]] = []
+        for n in to_probe:
+            try:
+                content = client.get_version_content(app_key, n["version"]) or {}
+            except Exception:
+                continue
+            rs = str(content.get("release_status", "") or n.get("release_status", "")).upper().strip()
+            stage = str(content.get("current_stage", "")).upper().strip()
+            if rs in (RELEASED, TRUSTED) and stage == "PROD":
+                # Preserve original tag if present in list response
+                probed_prod_full.append({
+                    "version": n["version"],
+                    "tag": n.get("tag", ""),
+                })
+        prod_candidates_full = probed_prod_full
+        prod_candidates = [n["version"] for n in prod_candidates_full]
+
+    if not prod_candidates:
         return None
-    ordered = sort_versions_by_semver_desc(prod)
+
+    # Prefer an entry explicitly tagged as 'latest' if present among PROD
+    try:
+        latest_tagged = next(
+            (n for n in prod_candidates_full if str(n.get("tag", "")).strip().lower() == "latest"),
+            None,
+        )
+        if latest_tagged:
+            return latest_tagged["version"]
+    except Exception:
+        pass
+
+    ordered = sort_versions_by_semver_desc(prod_candidates)
     return ordered[0] if ordered else None
 
 
