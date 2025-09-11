@@ -83,6 +83,16 @@ jobs:
       - name: Setup JFrog CLI
         # uses: jfrog/setup-jfrog-cli@v4
         uses: EyalDelarea/setup-jfrog-cli@swampUpAppTrust
+        with:
+          version: latest
+          oidc-provider-name: bookverse-platform-github
+          oidc-audience: ${{ vars.JFROG_URL }}
+          disable-job-summary: true
+          disable-auto-build-publish: true
+          disable-auto-evidence-collection: false
+        env:
+          JF_URL: ${{ vars.JFROG_URL }}
+          JF_PROJECT: ${{ vars.PROJECT_KEY }}
 
       - name: "[Configure] JFrog server (OIDC)"
         run: |
