@@ -16,7 +16,6 @@ The Platform repo provides shared components, utilities, and templates that othe
 
 ## Platform Aggregator
 
-- Plan of action: see `PLAN_OF_ACTION.md` for architecture, algorithms, workflow, and rollout strategy.
 - Aggregator CLI entrypoint: `python -m app.main`
 - Static services config: `config/services.yaml` (PROD-only sourcing; SBOM handled by AppTrust automatically)
 - Manifests output directory: `manifests/`
