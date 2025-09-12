@@ -120,7 +120,14 @@ jobs:
               -H "Authorization: Bearer $APPTRUST_ACCESS_TOKEN" \
               -H "Accept: application/json")
             if [[ "$HTTP_STATUS" -ge 200 && "$HTTP_STATUS" -lt 300 ]]; then
-              TARGET_VERSION=$(jq -r '.versions[] | select(.release_status == "RELEASED" or .release_status == "TRUSTED_RELEASE") | .version' "$RESP_FILE" | head -n1)
+              # First try to find RELEASED or TRUSTED_RELEASE versions (preferred)
+              TARGET_VERSION=$(jq -r '.versions[] | select((.release_status|tostring|ascii_upcase)=="RELEASED" or (.release_status|tostring|ascii_upcase)=="TRUSTED_RELEASE") | .version' "$RESP_FILE" | head -n1)
+              
+              # If no RELEASED/TRUSTED_RELEASE versions found, try PRE_RELEASE as fallback
+              if [ -z "${TARGET_VERSION:-}" ] || [ "$TARGET_VERSION" = "null" ]; then
+                echo "ℹ️ No RELEASED/TRUSTED_RELEASE versions found, using latest PRE_RELEASE version"
+                TARGET_VERSION=$(jq -r '.versions[] | select((.release_status|tostring|ascii_upcase)=="PRE_RELEASE") | .version' "$RESP_FILE" | head -n1)
+              fi
             fi
             rm -f "$RESP_FILE"
             if [ -z "${TARGET_VERSION:-}" ] || [ "$TARGET_VERSION" = "null" ]; then
