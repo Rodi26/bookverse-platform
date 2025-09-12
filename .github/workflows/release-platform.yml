@@ -170,6 +170,9 @@ jobs:
           PY
 
       - name: "[Tags] Enforce PROD 'latest' invariants"
+        env:
+          JFROG_URL: ${{ vars.JFROG_URL }}
+          JF_ACCESS_TOKEN: ${{ env.JF_ACCESS_TOKEN }}
         run: |
           set -euo pipefail
           if ! command -v jq >/dev/null 2>&1; then sudo apt-get update -y && sudo apt-get install -y jq; fi
