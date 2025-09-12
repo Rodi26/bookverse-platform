@@ -70,20 +70,23 @@ jobs:
         env:
           JFROG_URL: ${{ vars.JFROG_URL }}
           JFROG_ADMIN_TOKEN: ${{ env.JF_ACCESS_TOKEN }}
+          PROJECT_KEY: ${{ vars.PROJECT_KEY }}
         run: |
           python - << 'PY'
-          import os, json, urllib.request
+          import os, json, urllib.request, urllib.parse
           from urllib.error import HTTPError
           base = (os.environ.get("JFROG_URL", "").rstrip('/') + "/apptrust/api/v1").rstrip('/')
           token = os.environ.get("JFROG_ADMIN_TOKEN", "")
+          project_key = os.environ.get("PROJECT_KEY", "bookverse")
           app = "bookverse-platform"
           # Input preferred
           version = "${{ github.event.inputs.version }}".strip()
           print(f"Debug: AppTrust base URL: {base}")
           print(f"Debug: Application: {app}")
+          print(f"Debug: Project: {project_key}")
           print(f"Debug: Token available: {'Yes' if token else 'No'}")
           def list_versions():
-            url = f"{base}/applications/{app}/versions?limit=50&order_by=created&order_asc=false"
+            url = f"{base}/applications/{urllib.parse.quote(app)}/versions?limit=50&order_by=created&order_asc=false"
             print(f"Debug: Calling list_versions URL: {url}")
             try:
               req = urllib.request.Request(url=url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
@@ -94,7 +97,7 @@ jobs:
               print(f"Response body: {e.read().decode('utf-8') if hasattr(e, 'read') else 'N/A'}")
               raise
           def get_content(ver:str):
-            url = f"{base}/applications/{app}/versions/{ver}/content"
+            url = f"{base}/applications/{urllib.parse.quote(app)}/versions/{urllib.parse.quote(ver)}/content"
             print(f"Debug: Calling get_content URL: {url}")
             try:
               req = urllib.request.Request(url=url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
@@ -114,14 +117,20 @@ jobs:
                 create_app_payload = {
                   "application_name": "BookVerse Platform",
                   "application_key": app,
-                  "project_key": os.environ.get("PROJECT_KEY", "bookverse"),
+                  "project_key": project_key,
                   "description": "Integrated platform solution combining all microservices",
                   "criticality": "high"
                 }
+                print(f"Debug: Creating application with payload: {json.dumps(create_app_payload, indent=2)}")
                 create_req = urllib.request.Request(
                   url=f"{base}/applications",
                   data=json.dumps(create_app_payload).encode('utf-8'),
-                  headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+                  headers={
+                    "Authorization": f"Bearer {token}", 
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "X-JFrog-Project": project_key
+                  }
                 )
                 try:
                   with urllib.request.urlopen(create_req, timeout=30) as resp:
@@ -150,6 +159,12 @@ jobs:
               chosen = str((vers[0] or {}).get("version") or "") if vers else ""
             version = chosen
           if not version:
+            print("⚠️ No platform version found in STAGING.")
+            print("💡 Platform versions are created by the aggregate workflow.")
+            print("🔧 To create platform versions:")
+            print("   1. Run the 'Aggregate' workflow first")
+            print("   2. Promote a version to STAGING") 
+            print("   3. Then run this release workflow")
             raise SystemExit("Could not determine platform version (no STAGING version found)")
           geh = os.environ.get("GITHUB_ENV")
           if geh:
