@@ -73,23 +73,66 @@ jobs:
         run: |
           python - << 'PY'
           import os, json, urllib.request
+          from urllib.error import HTTPError
           base = (os.environ.get("JFROG_URL", "").rstrip('/') + "/apptrust/api/v1").rstrip('/')
           token = os.environ.get("JFROG_ADMIN_TOKEN", "")
           app = "bookverse-platform"
           # Input preferred
           version = "${{ github.event.inputs.version }}".strip()
+          print(f"Debug: AppTrust base URL: {base}")
+          print(f"Debug: Application: {app}")
+          print(f"Debug: Token available: {'Yes' if token else 'No'}")
           def list_versions():
             url = f"{base}/applications/{app}/versions?limit=50&order_by=created&order_asc=false"
-            req = urllib.request.Request(url=url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
-            with urllib.request.urlopen(req, timeout=30) as resp:
-              return json.loads(resp.read().decode("utf-8")) or {}
+            print(f"Debug: Calling list_versions URL: {url}")
+            try:
+              req = urllib.request.Request(url=url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                return json.loads(resp.read().decode("utf-8")) or {}
+            except HTTPError as e:
+              print(f"HTTP Error in list_versions: {e.code} {e.reason}")
+              print(f"Response body: {e.read().decode('utf-8') if hasattr(e, 'read') else 'N/A'}")
+              raise
           def get_content(ver:str):
             url = f"{base}/applications/{app}/versions/{ver}/content"
-            req = urllib.request.Request(url=url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
-            with urllib.request.urlopen(req, timeout=30) as resp:
-              return json.loads(resp.read().decode("utf-8")) or {}
+            print(f"Debug: Calling get_content URL: {url}")
+            try:
+              req = urllib.request.Request(url=url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                return json.loads(resp.read().decode("utf-8")) or {}
+            except HTTPError as e:
+              print(f"HTTP Error in get_content: {e.code} {e.reason}")
+              print(f"Response body: {e.read().decode('utf-8') if hasattr(e, 'read') else 'N/A'}")
+              raise
           if not version:
-            data = list_versions(); vers = data.get("versions", [])
+            try:
+              data = list_versions(); vers = data.get("versions", [])
+            except HTTPError as e:
+              if e.code == 404:
+                print(f"Application '{app}' not found. Attempting to create it...")
+                # Create the application first
+                create_app_payload = {
+                  "application_name": "BookVerse Platform",
+                  "application_key": app,
+                  "project_key": os.environ.get("PROJECT_KEY", "bookverse"),
+                  "description": "Integrated platform solution combining all microservices",
+                  "criticality": "high"
+                }
+                create_req = urllib.request.Request(
+                  url=f"{base}/applications",
+                  data=json.dumps(create_app_payload).encode('utf-8'),
+                  headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+                )
+                try:
+                  with urllib.request.urlopen(create_req, timeout=30) as resp:
+                    print(f"Application created successfully: {resp.read().decode('utf-8')}")
+                    # Now try to list versions again
+                    data = list_versions(); vers = data.get("versions", [])
+                except Exception as create_err:
+                  print(f"Failed to create application: {create_err}")
+                  raise SystemExit("Could not create or access platform application")
+              else:
+                raise
             chosen = ""
             for v in vers:
               ver = str(v.get("version") or "").strip()

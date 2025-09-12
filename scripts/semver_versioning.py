@@ -305,8 +305,9 @@ def main():
     if env_path:
         with open(env_path, "a", encoding="utf-8") as f:
             f.write(f"APP_VERSION={app_version}\n")
-            f.write(f"BUILD_NUMBER={build_number}\n")
-            # Default IMAGE_TAG to BUILD_NUMBER for compatibility
+            # Don't overwrite BUILD_NUMBER - keep the original GitHub run format for JFrog build tracking
+            # f.write(f"BUILD_NUMBER={build_number}\n")  # REMOVED: This was causing collisions
+            # Use computed build_number for IMAGE_TAG to ensure uniqueness
             f.write(f"IMAGE_TAG={build_number}\n")
             for k, v in pkg_tags.items():
                 key = re.sub(r"[^A-Za-z0-9_]", "_", k.upper())
