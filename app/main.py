@@ -2,8 +2,6 @@ import argparse
 import datetime as dt
 import json
 import os
-import shutil
-import subprocess
 import re
 import urllib.parse
 import urllib.request
@@ -138,65 +136,6 @@ class AppTrustClient:
         return self._request("POST", path, body=body)
 
 
-class AppTrustClientCLI:
-    """AppTrust client backed by JFrog CLI (OIDC-enabled)."""
-
-    def __init__(self, timeout_seconds: int = 30) -> None:
-        self.timeout_seconds = timeout_seconds
-        # Prefer explicit base URL provided by workflow env; fall back to JFROG_URL
-        base_from_env = os.environ.get("APPTRUST_BASE_URL", "").rstrip("/")
-        if base_from_env:
-            self.base_url = base_from_env
-        else:
-            jfrog_url = os.environ.get("JFROG_URL", "").rstrip("/")
-            self.base_url = f"{jfrog_url}/apptrust/api/v1" if jfrog_url else ""
-
-    @staticmethod
-    def _ensure_cli_available() -> None:
-        if shutil.which("jf") is None:
-            raise RuntimeError("JFrog CLI (jf) not found on PATH. Install/configure it for OIDC.")
-
-    def _run_jf(self, method: str, path: str, body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        AppTrustClientCLI._ensure_cli_available()
-        # Build URI path for jf rt curl (must not include scheme/host)
-        uri = path
-        if path.startswith("http://") or path.startswith("https://"):
-            try:
-                from urllib.parse import urlparse
-                parsed = urlparse(path)
-                uri = (parsed.path or "/") + (f"?{parsed.query}" if parsed.query else "")
-            except Exception:
-                uri = path
-        elif not path.startswith("/"):
-            uri = "/" + path
-        args: List[str] = ["jf", "rt", "curl", "-X", method.upper(), uri]
-        # Ensure Authorization header is present for AppTrust API calls
-        token = os.environ.get("APPTRUST_ACCESS_TOKEN", "").strip()
-        if token:
-            args += ["-H", f"Authorization: Bearer {token}"]
-        if body is not None:
-            args += ["-H", "Content-Type: application/json", "-d", json.dumps(body)]
-        try:
-            proc = subprocess.run(args, check=True, capture_output=True, text=True)
-        except subprocess.CalledProcessError as e:
-            # Include stdout snippet for better diagnostics if stderr is empty
-            err = e.stderr.strip() or e.stdout.strip() or str(e)
-            raise RuntimeError(f"jf curl failed: {err}")
-        raw = (proc.stdout or "").strip()
-        if not raw:
-            return {}
-        try:
-            return json.loads(raw)
-        except Exception:
-            return {"raw": raw}
-
-    def list_application_versions(self, app_key: str, limit: int = 200) -> Dict[str, Any]:
-        path = f"/apptrust/api/v1/applications/{urllib.parse.quote(app_key)}/versions"
-        return self._run_jf("GET", path + f"?limit={limit}&order_by=created&order_asc=false")
-
-    def get_version_content(self, app_key: str, version: str) -> Dict[str, Any]:
-        path = f"/apptrust/api/v1/applications/{urllib.parse.quote(app_key)}/versions/{urllib.parse.quote(version)}/content"
-        return self._run_jf("GET", path)
 
     def create_platform_version(self, platform_app_key: str, version: str, sources_versions: List[Dict[str, str]]) -> Dict[str, Any]:
         path = f"/apptrust/api/v1/applications/{urllib.parse.quote(platform_app_key)}/versions"
@@ -479,14 +418,16 @@ def main() -> int:
             continue
         overrides[svc] = ver
 
-    # Prefer direct HTTP client when explicit APPTRUST env is provided; otherwise use OIDC CLI.
+    # Require OIDC authentication via environment variables
+    base_url = os.environ.get("APPTRUST_BASE_URL", "").strip()
+    token = os.environ.get("APPTRUST_ACCESS_TOKEN", "").strip()
+    
+    if not base_url or not token:
+        print("ERROR: Both APPTRUST_BASE_URL and APPTRUST_ACCESS_TOKEN environment variables are required", flush=True)
+        return 2
+    
     try:
-        base_url = os.environ.get("APPTRUST_BASE_URL", "").strip()
-        token = os.environ.get("APPTRUST_ACCESS_TOKEN", "").strip()
-        if base_url and token:
-            client = AppTrustClient(base_url=base_url, token=token)
-        else:
-            client = AppTrustClientCLI()
+        client = AppTrustClient(base_url=base_url, token=token)
     except Exception as e:
         print(f"Auth/client initialization failed: {e}", flush=True)
         return 2

@@ -12,8 +12,16 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY config ./config
 
-# Default to aggregator CLI; webhook adapter is optional and not used in the direct JFrog→GitHub path
-ENTRYPOINT ["python", "-m", "app.main"]
-CMD ["--config", "/app/config/services.yaml", "--output-dir", "/app/manifests", "--source-stage", "PROD", "--preview"]
+# Expose port for tagging service
+EXPOSE 8000
+
+# Support both aggregator CLI and tagging service
+# Use environment variable SERVICE_MODE to determine which to run
+# Default to aggregator CLI for backward compatibility
+COPY entrypoint.sh ./
+RUN chmod +x entrypoint.sh
+
+ENTRYPOINT ["./entrypoint.sh"]
+CMD ["aggregator"]
 
 
