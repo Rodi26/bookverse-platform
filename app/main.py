@@ -214,7 +214,7 @@ TRUSTED_RELEASE = "TRUSTED_RELEASE"
 
 
 def compute_next_semver_for_application(client: AppTrustClient, app_key: str) -> str:
-    """Return next SemVer: bump patch if any exists; else generate one random initial version."""
+    """Return next SemVer: bump patch if any exists; else bump seed version as fallback."""
     try:
         resp = client.list_application_versions(app_key, limit=1)
         versions = resp.get("versions", []) if isinstance(resp, dict) else []
@@ -226,16 +226,28 @@ def compute_next_semver_for_application(client: AppTrustClient, app_key: str) ->
     if parsed is not None:
         return f"{parsed.major}.{parsed.minor}.{parsed.patch + 1}"
 
-    # No existing versions; generate a randomized initial SemVer for demo realism
-    # major: 1-5, minor: 1-50, patch: 1-50
+    # No existing versions; use seed from version-map.yaml and bump it
     try:
-        import random
-        major = random.randint(1, 5)
-        minor = random.randint(1, 50)
-        patch = random.randint(1, 50)
-        return f"{major}.{minor}.{patch}"
+        version_map_path = Path(__file__).parent.parent / "config" / "version-map.yaml"
+        if version_map_path.exists():
+            with version_map_path.open("r", encoding="utf-8") as f:
+                version_map = yaml.safe_load(f) or {}
+            
+            # Find the application entry
+            for app in version_map.get("applications", []):
+                if app.get("key") == app_key:
+                    seed = app.get("seeds", {}).get("application")
+                    if seed:
+                        seed_parsed = SemVer.parse(str(seed))
+                        if seed_parsed:
+                            # Bump the seed version's patch to avoid repeats
+                            return f"{seed_parsed.major}.{seed_parsed.minor}.{seed_parsed.patch + 1}"
+                    break
     except Exception:
-        return "1.0.0"
+        pass
+    
+    # Final fallback if no version map or seed found
+    return "1.0.1"
 
 
 def pick_latest_prod_version(client: AppTrustClient, app_key: str) -> Optional[str]:

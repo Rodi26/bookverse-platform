@@ -143,6 +143,50 @@ jobs:
             raise
           PY
 
+      - name: "[Tags] Enforce PROD 'latest' invariants (if promoted to PROD)"
+        run: |
+          set -euo pipefail
+          # Only run this if we would be promoting to PROD (though promote workflow targets non-PROD)
+          if [[ "${TARGET_DISPLAY:-}" != "PROD" ]]; then
+            echo "ℹ️ Skipping PROD latest tag enforcement (target is ${TARGET_DISPLAY:-unknown})"
+            exit 0
+          fi
+          
+          if ! command -v jq >/dev/null 2>&1; then sudo apt-get update -y && sudo apt-get install -y jq; fi
+          APP_KEY="bookverse-platform"
+          BASE="${{ vars.JFROG_URL }}/apptrust/api/v1"
+          TOKEN="$JF_ACCESS_TOKEN"
+          RESP=$(mktemp)
+          code=$(curl -sS -L -o "$RESP" -w "%{http_code}" \
+            "$BASE/applications/$APP_KEY/versions?limit=1000&order_by=created&order_asc=false" \
+            -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" || echo 000)
+          if [[ "$code" -lt 200 || "$code" -ge 300 ]]; then
+            echo "❌ Failed to list versions (HTTP $code)" >&2; cat "$RESP" || true; exit 1
+          fi
+          DESIRED=$(jq -r '[.versions[] | select((.release_status|tostring|ascii_upcase)=="RELEASED" or (.release_status|tostring|ascii_upcase)=="TRUSTED_RELEASE") | .version] | unique | map(select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))) | sort_by(split(".")|map(tonumber)) | last // empty' "$RESP")
+          if [[ -z "$DESIRED" ]]; then
+            mapfile -t PREV_LATEST < <(jq -r '.versions[] | select(.tag=="latest") | .version' "$RESP")
+            for pv in "${PREV_LATEST[@]:-}"; do
+              [ -z "$pv" ] && continue
+              restore=$(jq -r --arg v "$pv" '.versions[] | select(.version==$v) | (.properties.original_tag_before_latest[0] // .version // "")' "$RESP")
+              printf '{"tag":"%s","delete_properties":["original_tag_before_latest"]}' "$restore" > body.json
+              curl -sS -L -X PATCH "$BASE/applications/$APP_KEY/versions/$pv" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d @body.json | cat
+            done
+            rm -f "$RESP" body.json
+            exit 0
+          fi
+          CURR_TAG=$(jq -r --arg v "$DESIRED" '.versions[] | select(.version==$v) | (.tag // "")' "$RESP")
+          jq -n --arg ct "$CURR_TAG" '{tag:"latest", properties:{original_tag_before_latest:[$ct]}}' > body.json
+          curl -sS -L -X PATCH "$BASE/applications/$APP_KEY/versions/$DESIRED" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d @body.json | cat
+          mapfile -t OTHERS < <(jq -r --arg v "$DESIRED" '.versions[] | select(.tag=="latest" and .version!=$v) | .version' "$RESP")
+          for ov in "${OTHERS[@]:-}"; do
+            [ -z "$ov" ] && continue
+            restore=$(jq -r --arg v "$ov" '.versions[] | select(.version==$v) | (.properties.original_tag_before_latest[0] // .version // "")' "$RESP")
+            printf '{"tag":"%s","delete_properties":["original_tag_before_latest"]}' "$restore" > body.json
+            curl -sS -L -X PATCH "$BASE/applications/$APP_KEY/versions/$ov" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d @body.json | cat
+          done
+          rm -f "$RESP" body.json || true
+
       - name: "[Summary] Promotion"
         if: always()
         run: |

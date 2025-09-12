@@ -1,0 +1,4 @@
+applications:
+  - key: bookverse-platform
+    seeds:
+      application: 2.1.15

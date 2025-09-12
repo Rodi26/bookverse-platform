@@ -226,6 +226,61 @@ jobs:
           if [[ -n "${{ inputs.web_version }}" ]]; then ARGS="$ARGS --override web=${{ inputs.web_version }}"; fi
           python -m app.main $ARGS | tee release_output.txt
 
+      - name: "[Tags] Set random tag for new platform version"
+        if: ${{ inputs.preview != true && inputs.create == true }}
+        run: |
+          set -euo pipefail
+          # Extract platform version from the release output
+          PLATFORM_VERSION=$(grep -o '"platform_app_version": "[^"]*"' release_output.txt | sed 's/"platform_app_version": "//; s/"//' | head -1)
+          if [[ -z "$PLATFORM_VERSION" ]]; then
+            echo "⚠️ Could not extract platform version from output, skipping tag assignment"
+            exit 0
+          fi
+          
+          # Array of realistic single tags for demo
+          TAG_OPTIONS=(
+            "release"
+            "hotfix"
+            "feature"
+            "bugfix"
+            "enhancement"
+            "security"
+            "performance"
+            "refactor"
+            "experimental"
+            "maintenance"
+            "integration"
+            "documentation"
+            "stable"
+            "beta"
+            "alpha"
+            "critical"
+            "patch"
+            "minor"
+            "major"
+            "cleanup"
+          )
+          
+          # Randomly select single tag based on run number for consistency
+          TAG_INDEX=$((${{ github.run_number }} % ${#TAG_OPTIONS[@]}))
+          PLATFORM_TAG="${TAG_OPTIONS[$TAG_INDEX]}"
+          echo "🏷️ Platform Version Tag (demo simulation): $PLATFORM_TAG"
+          
+          # Update the platform version tag
+          if ! command -v jq >/dev/null 2>&1; then sudo apt-get update -y && sudo apt-get install -y jq; fi
+          APP_KEY="bookverse-platform"
+          BASE="${APPTRUST_BASE_URL:-${JFROG_URL%/}/apptrust/api/v1}"
+          TOKEN="$JF_ACCESS_TOKEN"
+          
+          # Set the random tag for the new platform version
+          jq -n --arg tag "$PLATFORM_TAG" '{tag: $tag}' > tag_body.json
+          curl -sS -L -X PATCH "$BASE/applications/$APP_KEY/versions/$PLATFORM_VERSION" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" \
+            -d @tag_body.json | cat
+          rm -f tag_body.json || true
+          echo "✅ Set tag '$PLATFORM_TAG' for platform version $PLATFORM_VERSION"
+
       - name: "[Summary] Job summary (release)"
         if: ${{ inputs.preview != true && inputs.create == true }}
         run: |

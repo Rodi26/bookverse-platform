@@ -141,6 +141,29 @@ jobs:
         run: |
           python scripts/apptrust_rollback.py --version "${TARGET_VERSION}"
 
+      - name: "[Tags] Mark rolled back version as Quarantine"
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          set -euo pipefail
+          if ! command -v jq >/dev/null 2>&1; then sudo apt-get update -y && sudo apt-get install -y jq; fi
+          APP_KEY="bookverse-platform"
+          BASE="${{ vars.JFROG_URL }}/apptrust/api/v1"
+          TOKEN="$JF_ACCESS_TOKEN"
+          ROLLBACK_VERSION="$TARGET_VERSION"
+          
+          # Generate quarantine tag with timestamp
+          QUARANTINE_TAG="Quarantine-$(date -u +%Y%m%d-%H%M%S)"
+          echo "🚨 Marking rolled back version $ROLLBACK_VERSION with quarantine tag: $QUARANTINE_TAG"
+          
+          # Set quarantine tag for the rolled back version  
+          jq -n --arg tag "$QUARANTINE_TAG" '{tag: $tag, delete_properties: ["original_tag_before_latest"]}' > quarantine_body.json
+          curl -sS -L -X PATCH "$BASE/applications/$APP_KEY/versions/$ROLLBACK_VERSION" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" \
+            -d @quarantine_body.json | cat
+          rm -f quarantine_body.json || true
+          echo "✅ Quarantine tag set for rolled back version $ROLLBACK_VERSION"
+
       - name: "[Tags] Enforce PROD 'latest' invariants"
         if: ${{ inputs.dry_run != true }}
         run: |
