@@ -137,9 +137,10 @@ jobs:
 
       - name: "[Setup] AppTrust context"
         run: |
-          BASE="${JFROG_URL%/}"
+          BASE="${{ vars.JFROG_URL }}"
+          BASE="${BASE%/}"
           echo "APPTRUST_BASE_URL=${BASE}/apptrust/api/v1" >> "$GITHUB_ENV"
-          echo "APPTRUST_ACCESS_TOKEN=${JF_OIDC_TOKEN}" >> "$GITHUB_ENV"
+          echo "APPTRUST_ACCESS_TOKEN=${{ steps.exchange-oidc.outputs.token }}" >> "$GITHUB_ENV"
 
       - name: "[Run] Create version and write manifest"
         id: collect-versions
