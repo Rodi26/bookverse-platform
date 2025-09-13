@@ -126,7 +126,7 @@ class AppTrustClient:
         return self._request("GET", path)
 
     def create_platform_version(self, platform_app_key: str, version: str, sources_versions: List[Dict[str, str]]) -> Dict[str, Any]:
-        path = f"/apptrust/api/v1/applications/{urllib.parse.quote(platform_app_key)}/versions"
+        path = f"/applications/{urllib.parse.quote(platform_app_key)}/versions"
         body = {
             "version": version,
             "sources": {
