@@ -206,8 +206,8 @@ jobs:
                   f.write(f"{service_name}_version={version}\n")
           EOF
           
-          # Run collection script
-          python collect_versions.py
+          # Run collection script with environment variables
+          BASE_URL="$BASE_URL" JF_ACCESS_TOKEN="$JF_ACCESS_TOKEN" python collect_versions.py
           
           echo "✅ Service version collection complete"
 
