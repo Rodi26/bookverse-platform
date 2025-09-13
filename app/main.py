@@ -396,14 +396,14 @@ def main() -> int:
     overrides: Dict[str, str] = {}
     for ov in getattr(args, "override", []) or []:
         if "=" not in ov:
-            print(f"Ignoring malformed override: {ov}")
-            continue
+            print(f"ERROR: Malformed override '{ov}' - must be in format 'service=version'", flush=True)
+            return 2
         svc, ver = ov.split("=", 1)
         svc = svc.strip()
         ver = ver.strip()
         if not svc or not ver:
-            print(f"Ignoring malformed override: {ov}")
-            continue
+            print(f"ERROR: Malformed override '{ov}' - service and version cannot be empty", flush=True)
+            return 2
         overrides[svc] = ver
 
     # Require OIDC authentication via environment variables

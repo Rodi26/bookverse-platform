@@ -1,0 +1,432 @@
+name: Platform Aggregate & Promote
+
+# DEMO-READY: Bi-weekly scheduled aggregation + manual triggers for hotfix capability
+# PRODUCTION NOTE: Real systems would have additional approval gates and staging validation
+on:
+  # Bi-weekly schedule: Every second Monday at 09:00 UTC
+  schedule:
+    - cron: '0 9 */14 * 1'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for manual platform aggregation'
+        required: false
+        default: 'Manual hotfix or testing'
+        type: string
+      create_version:
+        description: "Create platform application version"
+        required: false
+        default: true
+        type: boolean
+      auto_promote:
+        description: "Automatically promote through all stages to PROD"
+        required: false
+        default: true
+        type: boolean
+      preview_only:
+        description: "Preview only (no writes)"
+        required: false
+        default: false
+        type: boolean
+      inventory_version:
+        description: "Force inventory version (optional)"
+        required: false
+        type: string
+      recommendations_version:
+        description: "Force recommendations version (optional)"
+        required: false
+        type: string
+      checkout_version:
+        description: "Force checkout version (optional)"
+        required: false
+        type: string
+      web_version:
+        description: "Force web version (optional)"
+        required: false
+        type: string
+
+jobs:
+  aggregate:
+    name: "Platform Aggregation"
+    runs-on: ubuntu-latest
+    outputs:
+      platform_version: ${{ steps.create-version.outputs.platform_version }}
+      manifest_created: ${{ steps.create-version.outputs.manifest_created }}
+      build_name: ${{ steps.setup-build.outputs.build_name }}
+      build_number: ${{ steps.setup-build.outputs.build_number }}
+    defaults:
+      run:
+        shell: bash
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: "[Setup] Checkout"
+        uses: actions/checkout@v4
+
+      - name: "[Setup] JFrog CLI"
+        uses: jfrog/setup-jfrog-cli@v4
+        env:
+          JF_URL: ${{ vars.JFROG_URL }}
+          JF_PROJECT: ${{ vars.PROJECT_KEY }}
+        with:
+          version: latest
+          oidc-provider-name: bookverse-platform-github
+          disable-job-summary: true
+          oidc-audience: ${{ vars.JFROG_URL }}
+
+      - name: "[Setup] Build Info"
+        id: setup-build
+        run: |
+          BUILD_NAME="${{ github.event.repository.name }}_${{ github.workflow }}_${{ github.job }}"
+          BUILD_NUMBER="${{ github.run_number }}-${{ github.run_attempt }}"
+          echo "build_name=$BUILD_NAME" >> $GITHUB_OUTPUT
+          echo "build_number=$BUILD_NUMBER" >> $GITHUB_OUTPUT
+          echo "BUILD_NAME=$BUILD_NAME" >> $GITHUB_ENV
+          echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_ENV
+          echo "✅ Build info: $BUILD_NAME#$BUILD_NUMBER"
+
+      - name: "[Auth] Exchange GitHub OIDC for JFrog access token"
+        id: exchange-oidc
+        run: |
+          set -euo pipefail
+          BASE="${{ vars.JFROG_URL }}"; BASE="${BASE%/}"
+          if [[ -z "$BASE" ]]; then echo "Missing vars.JFROG_URL" >&2; exit 1; fi
+          PROVIDER_NAME="bookverse-platform-github"
+          # Mint GitHub OIDC ID token with audience = JFrog URL (align with CI workflow)
+          JF_URL="$BASE"
+          if [[ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" || -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]]; then
+            echo "❌ Missing GitHub OIDC request env vars" >&2; exit 1; fi
+          echo "🔑 Minting GitHub OIDC ID token (audience=$JF_URL)"
+          ID_TOKEN=$(curl -fsSL -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${JF_URL}" | jq -r .value)
+          if [[ -z "$ID_TOKEN" || "$ID_TOKEN" == "null" ]]; then echo "❌ Failed to fetch GitHub ID token" >&2; exit 1; fi
+          echo "🔁 Exchanging OIDC for JFrog access token (provider=$PROVIDER_NAME)"
+          PAYLOAD=$(jq -n --arg jwt "$ID_TOKEN" \
+            --arg provider_name "$PROVIDER_NAME" \
+            --arg project_key "${{ vars.PROJECT_KEY }}" \
+            --arg job_id "${{ github.job }}" \
+            '{
+              "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+              "subject_token_type": "urn:ietf:params:oauth:token-type:id_token", 
+              "subject_token": $jwt,
+              "provider_name": $provider_name,
+              "project_key": $project_key
+            }')
+          RESPONSE=$(curl -fsSL -X POST "$BASE/access/api/v1/oidc/token" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+          JF_ACCESS_TOKEN=$(echo "$RESPONSE" | jq -r '.access_token // empty')
+          if [[ -z "$JF_ACCESS_TOKEN" ]]; then
+            echo "❌ Failed to exchange OIDC token" >&2
+            echo "Response: $RESPONSE" >&2
+            exit 1
+          fi
+          echo "token=$JF_ACCESS_TOKEN" >> $GITHUB_OUTPUT
+          echo "✅ Successfully exchanged OIDC token for JFrog access"
+
+      - name: "[Setup] Python"
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: "[Aggregate] Collect service versions from PROD"
+        id: collect-versions
+        run: |
+          set -euo pipefail
+          echo "🔍 Collecting latest PROD versions from all services..."
+          
+          # Use the exchanged OIDC token for API calls
+          JF_ACCESS_TOKEN="${{ steps.exchange-oidc.outputs.token }}"
+          BASE="${{ vars.JFROG_URL }}"
+          BASE="${BASE%/}"
+          
+          # Create Python script to collect versions
+          cat > collect_versions.py << 'EOF'
+          import json
+          import os
+          import sys
+          import urllib.request
+          import urllib.parse
+          
+          def get_prod_versions(base_url, token, app_key):
+              """Get PROD versions for an application"""
+              url = f"{base_url}/apptrust/api/v1/applications/{urllib.parse.quote(app_key)}/versions"
+              req = urllib.request.Request(url)
+              req.add_header('Authorization', f'Bearer {token}')
+              req.add_header('Content-Type', 'application/json')
+              
+              try:
+                  with urllib.request.urlopen(req) as response:
+                      data = json.loads(response.read().decode())
+                      # Filter for PROD stage versions
+                      prod_versions = [v for v in data.get('versions', []) if v.get('current_stage') == 'PROD']
+                      if prod_versions:
+                          # Return latest PROD version (assuming sorted by creation time)
+                          latest = max(prod_versions, key=lambda x: x.get('created', ''))
+                          return latest.get('version')
+              except Exception as e:
+                  print(f"Warning: Could not fetch PROD versions for {app_key}: {e}", file=sys.stderr)
+              return None
+          
+          # Configuration
+          base_url = os.environ['BASE_URL']
+          token = os.environ['JF_ACCESS_TOKEN']
+          
+          services = [
+              {'app_key': 'bookverse-inventory', 'force_version': os.environ.get('INVENTORY_VERSION', '').strip()},
+              {'app_key': 'bookverse-recommendations', 'force_version': os.environ.get('RECOMMENDATIONS_VERSION', '').strip()},
+              {'app_key': 'bookverse-checkout', 'force_version': os.environ.get('CHECKOUT_VERSION', '').strip()},
+              {'app_key': 'bookverse-web', 'force_version': os.environ.get('WEB_VERSION', '').strip()}
+          ]
+          
+          versions = {}
+          for service in services:
+              app_key = service['app_key']
+              force_version = service['force_version']
+              
+              if force_version:
+                  print(f"Using forced version for {app_key}: {force_version}")
+                  versions[app_key] = force_version
+              else:
+                  prod_version = get_prod_versions(base_url, token, app_key)
+                  if prod_version:
+                      print(f"Found PROD version for {app_key}: {prod_version}")
+                      versions[app_key] = prod_version
+                  else:
+                      print(f"No PROD version found for {app_key}, skipping")
+          
+          # Output versions as JSON
+          print(json.dumps(versions, indent=2))
+          
+          # Set GitHub outputs
+          for app_key, version in versions.items():
+              service_name = app_key.replace('bookverse-', '')
+              print(f"{service_name}_version={version}")
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                  f.write(f"{service_name}_version={version}\n")
+          EOF
+          
+          # Run collection script
+          python collect_versions.py
+          
+          echo "✅ Service version collection complete"
+
+      - name: "[Aggregate] Create platform application version"
+        id: create-version
+        if: ${{ inputs.create_version != false && inputs.preview_only != true }}
+        run: |
+          set -euo pipefail
+          echo "🏗️ Creating platform application version..."
+          
+          # Use the exchanged OIDC token for API calls
+          JF_ACCESS_TOKEN="${{ steps.exchange-oidc.outputs.token }}"
+          BASE="${{ vars.JFROG_URL }}"
+          BASE="${BASE%/}"
+          
+          # Generate platform version (SemVer)
+          PLATFORM_VERSION=$(date +"%Y.%m.%d")-${{ github.run_number }}
+          echo "platform_version=$PLATFORM_VERSION" >> $GITHUB_OUTPUT
+          echo "PLATFORM_VERSION=$PLATFORM_VERSION" >> $GITHUB_ENV
+          
+          # Create platform manifest
+          cat > platform-manifest.json << EOF
+          {
+            "platform_version": "$PLATFORM_VERSION",
+            "created": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "services": {
+              "inventory": "${{ steps.collect-versions.outputs.inventory_version }}",
+              "recommendations": "${{ steps.collect-versions.outputs.recommendations_version }}",
+              "checkout": "${{ steps.collect-versions.outputs.checkout_version }}",
+              "web": "${{ steps.collect-versions.outputs.web_version }}"
+            },
+            "build_info": {
+              "name": "$BUILD_NAME",
+              "number": "$BUILD_NUMBER"
+            }
+          }
+          EOF
+          
+          echo "📋 Platform manifest:"
+          cat platform-manifest.json | jq .
+          
+          # Upload manifest to generic repository
+          GENERIC_REPO="${{ vars.PROJECT_KEY }}-platform-internal-generic-nonprod-local"
+          jf rt upload platform-manifest.json "$GENERIC_REPO/platform/manifests/$PLATFORM_VERSION/" --flat=true --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" --project "${{ vars.PROJECT_KEY }}"
+          
+          # Create AppTrust application version
+          echo "🚀 Creating AppTrust application version..."
+          
+          PAYLOAD=$(jq -n \
+            --arg app_key "bookverse-platform" \
+            --arg version "$PLATFORM_VERSION" \
+            --arg build_name "$BUILD_NAME" \
+            --arg build_number "$BUILD_NUMBER" \
+            --arg build_repo "${{ vars.PROJECT_KEY }}-build-info" \
+            '{
+              application_key: $app_key,
+              version: $version,
+              sources: {
+                build_name: $build_name,
+                build_number: $build_number,
+                build_repository: $build_repo
+              },
+              include_dependencies: false
+            }')
+          
+          echo "📤 AppTrust payload:"
+          echo "$PAYLOAD" | jq .
+          
+          RESPONSE=$(curl -fsSL -X POST "$BASE/apptrust/api/v1/applications/bookverse-platform/versions" \
+            -H "Authorization: Bearer $JF_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+          
+          echo "📥 AppTrust response:"
+          echo "$RESPONSE" | jq .
+          
+          # Validate creation
+          if echo "$RESPONSE" | jq -e '.version' > /dev/null; then
+            echo "✅ Platform application version created: $PLATFORM_VERSION"
+            echo "manifest_created=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Failed to create platform application version"
+            echo "$RESPONSE"
+            exit 1
+          fi
+
+      - name: "[Build Info] Publish"
+        run: |
+          jf rt bag --project "${{ vars.PROJECT_KEY }}" "$BUILD_NAME" "$BUILD_NUMBER"
+          jf rt bce --project "${{ vars.PROJECT_KEY }}" "$BUILD_NAME" "$BUILD_NUMBER"
+          jf rt bp --project "${{ vars.PROJECT_KEY }}" "$BUILD_NAME" "$BUILD_NUMBER"
+          echo "✅ Published build info: $BUILD_NAME#$BUILD_NUMBER"
+
+      - name: "[Summary] Aggregation"
+        run: |
+          echo "## 🏗️ Platform Aggregation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Platform Version:** \`${{ steps.create-version.outputs.platform_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Build:** \`$BUILD_NAME#$BUILD_NUMBER\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Service Versions" >> $GITHUB_STEP_SUMMARY
+          echo "- **Inventory:** \`${{ steps.collect-versions.outputs.inventory_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Recommendations:** \`${{ steps.collect-versions.outputs.recommendations_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Checkout:** \`${{ steps.collect-versions.outputs.checkout_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Web:** \`${{ steps.collect-versions.outputs.web_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- Platform manifest: \`${{ vars.PROJECT_KEY }}-platform-internal-generic-nonprod-local/platform/manifests/${{ steps.create-version.outputs.platform_version }}/\`" >> $GITHUB_STEP_SUMMARY
+
+  promote:
+    name: "Auto-Promote Platform"
+    needs: aggregate
+    if: ${{ needs.aggregate.outputs.manifest_created == 'true' && inputs.auto_promote != false && inputs.preview_only != true }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: "[Setup] Checkout"
+        uses: actions/checkout@v4
+
+      - name: "[Setup] JFrog CLI"
+        uses: jfrog/setup-jfrog-cli@v4
+        env:
+          JF_URL: ${{ vars.JFROG_URL }}
+          JF_PROJECT: ${{ vars.PROJECT_KEY }}
+        with:
+          version: latest
+          oidc-provider-name: bookverse-platform-github
+          disable-job-summary: true
+          oidc-audience: ${{ vars.JFROG_URL }}
+
+      - name: "[Auth] Exchange GitHub OIDC for JFrog access token"
+        id: exchange-oidc
+        run: |
+          set -euo pipefail
+          BASE="${{ vars.JFROG_URL }}"; BASE="${BASE%/}"
+          if [[ -z "$BASE" ]]; then echo "Missing vars.JFROG_URL" >&2; exit 1; fi
+          PROVIDER_NAME="bookverse-platform-github"
+          # Mint GitHub OIDC ID token with audience = JFrog URL (align with CI workflow)
+          JF_URL="$BASE"
+          if [[ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" || -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]]; then
+            echo "❌ Missing GitHub OIDC request env vars" >&2; exit 1; fi
+          echo "🔑 Minting GitHub OIDC ID token (audience=$JF_URL)"
+          ID_TOKEN=$(curl -fsSL -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${JF_URL}" | jq -r .value)
+          if [[ -z "$ID_TOKEN" || "$ID_TOKEN" == "null" ]]; then echo "❌ Failed to fetch GitHub ID token" >&2; exit 1; fi
+          echo "🔁 Exchanging OIDC for JFrog access token (provider=$PROVIDER_NAME)"
+          PAYLOAD=$(jq -n --arg jwt "$ID_TOKEN" \
+            --arg provider_name "$PROVIDER_NAME" \
+            --arg project_key "${{ vars.PROJECT_KEY }}" \
+            --arg job_id "${{ github.job }}" \
+            '{
+              "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+              "subject_token_type": "urn:ietf:params:oauth:token-type:id_token", 
+              "subject_token": $jwt,
+              "provider_name": $provider_name,
+              "project_key": $project_key
+            }')
+          RESPONSE=$(curl -fsSL -X POST "$BASE/access/api/v1/oidc/token" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+          JF_ACCESS_TOKEN=$(echo "$RESPONSE" | jq -r '.access_token // empty')
+          if [[ -z "$JF_ACCESS_TOKEN" ]]; then
+            echo "❌ Failed to exchange OIDC token" >&2
+            echo "Response: $RESPONSE" >&2
+            exit 1
+          fi
+          echo "token=$JF_ACCESS_TOKEN" >> $GITHUB_OUTPUT
+          echo "✅ Successfully exchanged OIDC token for JFrog access"
+
+      - name: "[Auto-Promote] Through All Stages to PROD"
+        run: |
+          set -euo pipefail
+          echo "🚀 Auto-promoting platform through all stages to PROD..."
+          
+          # Export token for promotion library
+          OIDC_TOKEN="${{ steps.exchange-oidc.outputs.token }}"
+          export APPTRUST_ACCESS_TOKEN="$OIDC_TOKEN"
+          
+          # Source the fixed promotion library
+          source .github/scripts/promote_lib.sh
+          
+          PLATFORM_VERSION="${{ needs.aggregate.outputs.platform_version }}"
+          APPLICATION_KEY="bookverse-platform"
+          
+          echo "📋 Promoting $APPLICATION_KEY@$PLATFORM_VERSION through all stages..."
+          
+          # Promote through each stage: UNASSIGNED → DEV → QA → STAGING → PROD
+          STAGES=("DEV" "QA" "STAGING" "PROD")
+          
+          for stage in "${STAGES[@]}"; do
+            echo "🎯 Promoting to $stage..."
+            if advance_one_step "$APPLICATION_KEY" "$PLATFORM_VERSION"; then
+              echo "✅ Successfully promoted to $stage"
+            else
+              echo "❌ Failed to promote to $stage"
+              exit 1
+            fi
+            
+            # Brief pause between promotions for demo visibility
+            sleep 2
+          done
+          
+          echo "🎉 Platform version $PLATFORM_VERSION successfully promoted to PROD!"
+
+      - name: "[Summary] Promotion"
+        run: |
+          echo "## 🚀 Platform Promotion Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Platform Version:** \`${{ needs.aggregate.outputs.platform_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Final Stage:** \`PROD\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🎯 Promotion Path" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ UNASSIGNED → DEV" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ DEV → QA" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ QA → STAGING" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ STAGING → PROD" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🎉 **Platform ready for release!**" >> $GITHUB_STEP_SUMMARY

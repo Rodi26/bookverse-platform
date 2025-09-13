@@ -178,32 +178,21 @@ async def validate_jwt_token(token: str) -> AuthUser:
 async def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ) -> Optional[AuthUser]:
-    """FastAPI dependency to get the current authenticated user"""
+    """FastAPI dependency to get the current authenticated user
     
-    # If authentication is disabled, return a mock user for development
-    if not AUTH_ENABLED:
-        logger.debug("🔓 Authentication disabled - returning mock user")
-        return AuthUser({
-            "sub": "dev-user",
-            "email": "dev@bookverse.com",
-            "name": "Development User",
-            "scope": "openid profile email bookverse:api",
-            "roles": ["user", "admin"]
-        })
+    Note: Authentication between K8s services is not in scope for this demo.
+    Returns a mock user for demo purposes.
+    """
     
-    # If no credentials provided
-    if not credentials:
-        if DEVELOPMENT_MODE:
-            logger.debug("🔧 Development mode - allowing unauthenticated access")
-            return None
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required",
-            headers={"WWW-Authenticate": "Bearer"}
-        )
-    
-    # Validate the token
-    return await validate_jwt_token(credentials.credentials)
+    # Demo: Return mock user since K8s inter-service auth is not in demo scope
+    logger.debug("🎯 Demo mode: Using mock user (K8s inter-service auth not in scope)")
+    return AuthUser({
+        "sub": "demo-user",
+        "email": "demo@bookverse.com",
+        "name": "Demo User",
+        "scope": "openid profile email bookverse:api",
+        "roles": ["user", "admin"]
+    })
 
 
 async def require_authentication(

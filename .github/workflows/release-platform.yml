@@ -63,20 +63,20 @@ jobs:
             }')
           TOKEN=$(curl -sS -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$JF_URL/access/api/v1/oidc/token" | jq -r .access_token)
           if [[ -z "$TOKEN" || "$TOKEN" == "null" ]]; then echo "❌ Failed to exchange OIDC token" >&2; exit 1; fi
-          echo "JF_ACCESS_TOKEN=$TOKEN" >> $GITHUB_ENV
+          echo "JF_OIDC_TOKEN=$TOKEN" >> $GITHUB_ENV
 
       - name: "[Resolve] Version (latest in STAGING if empty)"
         id: resolve
         env:
           JFROG_URL: ${{ vars.JFROG_URL }}
-          JFROG_ADMIN_TOKEN: ${{ env.JF_ACCESS_TOKEN }}
+          JF_OIDC_TOKEN: ${{ env.JF_OIDC_TOKEN }}
           PROJECT_KEY: ${{ vars.PROJECT_KEY }}
         run: |
           python - << 'PY'
           import os, json, urllib.request, urllib.parse
           from urllib.error import HTTPError
           base = (os.environ.get("JFROG_URL", "").rstrip('/') + "/apptrust/api/v1").rstrip('/')
-          token = os.environ.get("JFROG_ADMIN_TOKEN", "")
+          token = os.environ.get("JF_OIDC_TOKEN", "")
           project_key = os.environ.get("PROJECT_KEY", "bookverse")
           app = "bookverse-platform"
           # Input preferred
@@ -180,13 +180,13 @@ jobs:
       - name: "[Release] AppTrust"
         env:
           JFROG_URL: ${{ vars.JFROG_URL }}
-          JFROG_ADMIN_TOKEN: ${{ env.JF_ACCESS_TOKEN }}
+          JF_OIDC_TOKEN: ${{ env.JF_OIDC_TOKEN }}
           PROJECT_KEY: ${{ vars.PROJECT_KEY }}
         run: |
           python - << 'PY'
           import os, json, urllib.request
           base = (os.environ.get("JFROG_URL", "").rstrip('/') + "/apptrust/api/v1").rstrip('/')
-          token = os.environ.get("JFROG_ADMIN_TOKEN", "")
+          token = os.environ.get("JF_OIDC_TOKEN", "")
           app = "bookverse-platform"
           version = "${{ steps.resolve.outputs.version }}".strip() or os.environ.get("RESOLVED_VERSION", "${{ github.event.inputs.version }}").strip()
           # Discover and include only existing public release repositories for platform
@@ -230,13 +230,13 @@ jobs:
       - name: "[Tags] Enforce PROD 'latest' invariants"
         env:
           JFROG_URL: ${{ vars.JFROG_URL }}
-          JF_ACCESS_TOKEN: ${{ env.JF_ACCESS_TOKEN }}
+          JF_OIDC_TOKEN: ${{ env.JF_OIDC_TOKEN }}
         run: |
           set -euo pipefail
           if ! command -v jq >/dev/null 2>&1; then sudo apt-get update -y && sudo apt-get install -y jq; fi
           APP_KEY="bookverse-platform"
           BASE="${JFROG_URL%/}/apptrust/api/v1"
-          TOKEN="$JF_ACCESS_TOKEN"
+          TOKEN="$JF_OIDC_TOKEN"
           RESP=$(mktemp)
           code=$(curl -sS -L -o "$RESP" -w "%{http_code}" \
             "$BASE/applications/$APP_KEY/versions?limit=1000&order_by=created&order_asc=false" \

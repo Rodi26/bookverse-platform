@@ -46,7 +46,6 @@ jobs:
     env:
       # Prefer canonical JFrog variables used across the repo
       JFROG_URL: ${{ vars.JFROG_URL }}
-      JFROG_ADMIN_TOKEN: ${{ secrets.JFROG_ADMIN_TOKEN }}
     steps:
       - name: "[Setup] Checkout"
         uses: actions/checkout@v4
@@ -92,7 +91,7 @@ jobs:
             }')
           TOKEN=$(curl -sS -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$JF_URL/access/api/v1/oidc/token" | jq -r .access_token)
           if [[ -z "$TOKEN" || "$TOKEN" == "null" ]]; then echo "❌ Failed to exchange OIDC token" >&2; exit 1; fi
-          echo "JF_ACCESS_TOKEN=$TOKEN" >> $GITHUB_ENV
+          echo "JF_OIDC_TOKEN=$TOKEN" >> $GITHUB_ENV
 
       - name: "[Setup] Install dependencies"
         run: |
@@ -104,7 +103,7 @@ jobs:
         run: |
           BASE="${JFROG_URL%/}"
           echo "APPTRUST_BASE_URL=${BASE}/apptrust/api/v1" >> "$GITHUB_ENV"
-          echo "APPTRUST_ACCESS_TOKEN=${JF_ACCESS_TOKEN}" >> "$GITHUB_ENV"
+          echo "APPTRUST_ACCESS_TOKEN=${JF_OIDC_TOKEN}" >> "$GITHUB_ENV"
 
       - name: "[Setup] JFrog CLI"
         uses: jfrog/setup-jfrog-cli@v4
@@ -113,7 +112,7 @@ jobs:
 
       - name: "[Setup] Configure JFrog CLI"
         run: |
-          jf c add --interactive=false --url "$JFROG_URL" --access-token "$JF_ACCESS_TOKEN"
+          jf c add --interactive=false --url "$JFROG_URL" --access-token "$JF_OIDC_TOKEN"
           jf c show
 
       - name: "[Setup] Verify JFrog Authentication"
@@ -270,7 +269,7 @@ jobs:
           if ! command -v jq >/dev/null 2>&1; then sudo apt-get update -y && sudo apt-get install -y jq; fi
           APP_KEY="bookverse-platform"
           BASE="${APPTRUST_BASE_URL:-${JFROG_URL%/}/apptrust/api/v1}"
-          TOKEN="$JF_ACCESS_TOKEN"
+          TOKEN="$JF_OIDC_TOKEN"
           
           # Set the random tag for the new platform version
           jq -n --arg tag "$PLATFORM_TAG" '{tag: $tag}' > tag_body.json

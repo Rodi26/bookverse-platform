@@ -26,7 +26,6 @@ jobs:
       id-token: write
     env:
       JFROG_URL: ${{ vars.JFROG_URL }}
-      JFROG_ADMIN_TOKEN: ${{ secrets.JFROG_ADMIN_TOKEN }}
     steps:
       - name: "[Setup] Checkout"
         uses: actions/checkout@v4
@@ -66,13 +65,13 @@ jobs:
             }')
           TOKEN=$(curl -sS -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$JF_URL/access/api/v1/oidc/token" | jq -r .access_token)
           if [[ -z "$TOKEN" || "$TOKEN" == "null" ]]; then echo "❌ Failed to exchange OIDC token" >&2; exit 1; fi
-          echo "JF_ACCESS_TOKEN=$TOKEN" >> $GITHUB_ENV
+          echo "JF_OIDC_TOKEN=$TOKEN" >> $GITHUB_ENV
 
       - name: "[Setup] AppTrust context"
         run: |
           BASE="${JFROG_URL%/}"
           echo "APPTRUST_BASE_URL=${BASE}/apptrust/api/v1" >> "$GITHUB_ENV"
-          echo "APPTRUST_ACCESS_TOKEN=${JF_ACCESS_TOKEN}" >> "$GITHUB_ENV"
+          echo "APPTRUST_ACCESS_TOKEN=${JF_OIDC_TOKEN}" >> "$GITHUB_ENV"
 
       - name: "[Setup] Python"
         uses: actions/setup-python@v5
@@ -96,7 +95,7 @@ jobs:
 
       - name: "[Configure] JFrog server (OIDC)"
         run: |
-          jf c add --interactive=false --url "${{ vars.JFROG_URL }}" --access-token "$JF_ACCESS_TOKEN"
+          jf c add --interactive=false --url "${{ vars.JFROG_URL }}" --access-token "$JF_OIDC_TOKEN"
 
       - name: "[Preflight] Validate environment"
         run: |
@@ -145,8 +144,57 @@ jobs:
 
       - name: "[Rollback] Execute"
         if: ${{ inputs.dry_run != true }}
+        shell: bash
         run: |
-          python scripts/apptrust_rollback.py --version "${TARGET_VERSION}"
+          set -euo pipefail
+          echo "🧭 Starting rollback workflow"
+          APP_KEY="bookverse-platform"
+
+          # Snapshot BEFORE stage via content API
+          CONTENT_BEFORE=$(mktemp)
+          CODE_B=$(curl -sS -L -o "$CONTENT_BEFORE" -w "%{http_code}" \
+            -H "Authorization: Bearer $APPTRUST_ACCESS_TOKEN" -H "Accept: application/json" \
+            "$APPTRUST_BASE_URL/applications/$APP_KEY/versions/$TARGET_VERSION/content" || echo 000)
+          CURRENT_STAGE_BEFORE=""
+          if [[ "$CODE_B" -ge 200 && "$CODE_B" -lt 300 ]]; then
+            CURRENT_STAGE_BEFORE=$(jq -r '.current_stage // empty' "$CONTENT_BEFORE" 2>/dev/null || echo "")
+          fi
+          rm -f "$CONTENT_BEFORE"
+          echo "📍 Stage BEFORE: ${CURRENT_STAGE_BEFORE:-unknown}"
+          echo "CURRENT_STAGE_BEFORE=${CURRENT_STAGE_BEFORE:-}" >> $GITHUB_ENV
+
+          STATUS="SUCCESS"
+          MSG=""
+          echo "🔁 Executing rollback via AppTrust rollback API"
+          # Call JFrog AppTrust rollback API to perform stage rollback
+          from_stage="PROD"  # Always rollback from PROD for safety
+          echo "Calling AppTrust endpoint: POST /applications/$APP_KEY/versions/$TARGET_VERSION/rollback with body {from_stage: $from_stage}"
+          if curl -sS -L -X POST \
+            "$APPTRUST_BASE_URL/applications/$APP_KEY/versions/$TARGET_VERSION/rollback" \
+            -H "Authorization: Bearer $APPTRUST_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            -d "{\"from_stage\": \"$from_stage\"}" --fail; then
+            MSG="Rollback executed for $APP_KEY@$TARGET_VERSION from $from_stage"
+            echo "✅ $MSG"
+          else
+            STATUS="FAILED"
+            MSG="Rollback failed for $APP_KEY@$TARGET_VERSION"
+            echo "❌ $MSG"
+          fi
+
+          # Fetch AFTER stage via content API
+          CONTENT_TARGET=$(mktemp)
+          CODE_T=$(curl -sS -L -o "$CONTENT_TARGET" -w "%{http_code}" \
+            -H "Authorization: Bearer $APPTRUST_ACCESS_TOKEN" -H "Accept: application/json" \
+            "$APPTRUST_BASE_URL/applications/$APP_KEY/versions/$TARGET_VERSION/content" || echo 000)
+          CURR_STAGE_TARGET=""
+          if [[ "$CODE_T" -ge 200 && "$CODE_T" -lt 300 ]]; then
+            CURR_STAGE_TARGET=$(jq -r '.current_stage // empty' "$CONTENT_TARGET" 2>/dev/null || echo "")
+          fi
+          rm -f "$CONTENT_TARGET"
+          echo "📍 Stage AFTER:  ${CURR_STAGE_TARGET:-unknown}"
+          echo "CURR_STAGE_TARGET=${CURR_STAGE_TARGET:-}" >> $GITHUB_ENV
 
       - name: "[Tags] Mark rolled back version as Quarantine"
         if: ${{ inputs.dry_run != true }}
@@ -155,7 +203,7 @@ jobs:
           if ! command -v jq >/dev/null 2>&1; then sudo apt-get update -y && sudo apt-get install -y jq; fi
           APP_KEY="bookverse-platform"
           BASE="${{ vars.JFROG_URL }}/apptrust/api/v1"
-          TOKEN="$JF_ACCESS_TOKEN"
+          TOKEN="$JF_OIDC_TOKEN"
           ROLLBACK_VERSION="$TARGET_VERSION"
           
           # Generate quarantine tag with timestamp
@@ -178,7 +226,7 @@ jobs:
           if ! command -v jq >/dev/null 2>&1; then sudo apt-get update -y && sudo apt-get install -y jq; fi
           APP_KEY="bookverse-platform"
           BASE="${{ vars.JFROG_URL }}/apptrust/api/v1"
-          TOKEN="$JF_ACCESS_TOKEN"
+          TOKEN="$JF_OIDC_TOKEN"
           RESP=$(mktemp)
           code=$(curl -sS -L -o "$RESP" -w "%{http_code}" \
             "$BASE/applications/$APP_KEY/versions?limit=1000&order_by=created&order_asc=false" \
@@ -200,5 +248,101 @@ jobs:
             curl -sS -L -X PATCH "$BASE/applications/$APP_KEY/versions/$ov" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d @body.json | cat
           done
           rm -f "$RESP" body.json || true
+
+      - name: "[Validation] Check rollback success"
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          set -euo pipefail
+          if ! command -v jq >/dev/null 2>&1; then sudo apt-get update -y && sudo apt-get install -y jq; fi
+          
+          # Determine lifecycle stages to compute expected previous stage
+          PROJECT_KEY_ENV="${{ vars.PROJECT_KEY }}"
+          LC_FILE=$(mktemp)
+          PLATFORM_URL="${{ vars.JFROG_URL }}"
+          CODE_LC=$(curl -sS -L -o "$LC_FILE" -w "%{http_code}" \
+            -H "Authorization: Bearer $JF_OIDC_TOKEN" -H "Accept: application/json" \
+            "$PLATFORM_URL/access/api/v2/lifecycle/?project_key=$PROJECT_KEY_ENV" || echo 000)
+          NORM_FILE=$(mktemp)
+          if [[ "$CODE_LC" -ge 200 && "$CODE_LC" -lt 300 ]]; then
+            jq -c 'if type=="array" then . elif has("lifecycles") then .lifecycles elif has("items") then .items elif has("results") then .results elif (has("name") and has("stages")) then [.] else [] end' "$LC_FILE" > "$NORM_FILE" 2>/dev/null || printf '[]' > "$NORM_FILE"
+          else
+            printf '[]' > "$NORM_FILE"
+          fi
+          rm -f "$LC_FILE"
+          LIFECYCLE_NAME="bookverse-lifecycle"
+          STAGES=()
+          while IFS= read -r s; do
+            [ -z "$s" ] && continue
+            s_disp="$s"
+            case "$s_disp" in
+              "$PROJECT_KEY_ENV"-*) s_disp="${s_disp#${PROJECT_KEY_ENV}-}";;
+            esac
+            STAGES+=("$s_disp")
+          done < <(jq -r --arg n "$LIFECYCLE_NAME" '([ .[] | select(.name==$n) | .stages ] | .[0] // []) | map(if type=="object" then .name else . end) | .[]' "$NORM_FILE" 2>/dev/null)
+          rm -f "$NORM_FILE"
+          if [[ ${#STAGES[@]} -eq 0 ]]; then
+            STAGES=(DEV QA STAGING PROD)
+          fi
+          echo "🧭 Lifecycle stages: ${STAGES[*]}"
+          
+          # Compute expected previous stage
+          display_stage() {
+            local x="$1"; local p="$PROJECT_KEY_ENV"; if [[ "$x" == "PROD" || "$x" == "$p-PROD" ]]; then echo "PROD"; elif [[ "$x" == "$p-"* ]]; then echo "${x#${p}-}"; else echo "$x"; fi
+          }
+          CURR_BEFORE_DISP=$(display_stage "${CURRENT_STAGE_BEFORE}")
+          CURR_AFTER_DISP=$(display_stage "${CURR_STAGE_TARGET}")
+          idx_before=-1
+          for i in "${!STAGES[@]}"; do if [[ "${STAGES[$i]}" == "$CURR_BEFORE_DISP" ]]; then idx_before=$i; break; fi; done
+          EXPECTED_PREV="UNASSIGNED"
+          if [[ $idx_before -gt 0 ]]; then EXPECTED_PREV="${STAGES[$((idx_before-1))]}"; elif [[ $idx_before -eq 0 ]]; then EXPECTED_PREV="UNASSIGNED"; fi
+          echo "🔎 Expected previous stage: ${EXPECTED_PREV}"
+
+          VALIDATION_ERRORS=()
+          if [[ -z "$CURRENT_STAGE_BEFORE" || "$CURR_BEFORE_DISP" == "UNASSIGNED" ]]; then
+            VALIDATION_ERRORS+=("Cannot rollback UNASSIGNED version")
+          fi
+          if [[ "$CURR_AFTER_DISP" != "$EXPECTED_PREV" ]]; then
+            VALIDATION_ERRORS+=("Stage after rollback '$CURR_AFTER_DISP' != expected '$EXPECTED_PREV'")
+          fi
+
+          # Finalize validation status after all checks
+          STATUS="SUCCESS"
+          MSG="Rollback executed for bookverse-platform@${TARGET_VERSION}"
+          if [ ${#VALIDATION_ERRORS[@]} -gt 0 ]; then
+            STATUS="FAILED"
+            MSG="Validation failed: ${VALIDATION_ERRORS[*]}"
+          fi
+
+          {
+            echo "## 🔄 Platform Rollback"
+            echo ""
+            echo "**Repository:** \`${{ github.repository }}\`"
+            echo "**Application:** \`bookverse-platform\`"
+            echo "**Target Version:** \`${TARGET_VERSION:-unknown}\`"
+            echo "**Status:** ${STATUS}"
+            echo ""
+            echo "### Details"
+            echo "- Triggered by: \`${{ github.actor }}\`"
+            echo "- Workflow run: \`${{ github.run_id }}\` (attempt \`${{ github.run_attempt }}\`)"
+            echo "- Timestamp (UTC): \`$(date -u +%Y-%m-%dT%H:%M:%SZ)\`"
+            echo ""
+            echo "### Validation"
+            echo "- Stage before: \`${CURR_BEFORE_DISP:-unknown}\`"
+            echo "- Stage after:  \`${CURR_AFTER_DISP:-unknown}\`"
+            echo "- Expected previous stage: \`${EXPECTED_PREV:-unknown}\`"
+            if [ "${#VALIDATION_ERRORS[@]}" -gt 0 ]; then
+              echo "- Result: ❌ ${MSG}"
+            else
+              echo "- Result: ✅ Rollback validated"
+            fi
+            echo ""
+            echo "${MSG}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Fail the job if validation failed
+          if [ "$STATUS" = "FAILED" ]; then
+            echo "${MSG}" >&2
+            exit 1
+          fi
 
 

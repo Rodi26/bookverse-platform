@@ -69,13 +69,13 @@ jobs:
             }')
           TOKEN=$(curl -sS -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$JF_URL/access/api/v1/oidc/token" | jq -r .access_token)
           if [[ -z "$TOKEN" || "$TOKEN" == "null" ]]; then echo "❌ Failed to exchange OIDC token" >&2; exit 1; fi
-          echo "JF_ACCESS_TOKEN=$TOKEN" >> $GITHUB_ENV
+          echo "JF_OIDC_TOKEN=$TOKEN" >> $GITHUB_ENV
 
       - name: "[Promote] AppTrust"
         id: promote
         env:
           JFROG_URL: ${{ vars.JFROG_URL }}
-          JFROG_ADMIN_TOKEN: ${{ env.JF_ACCESS_TOKEN }}
+          JF_OIDC_TOKEN: ${{ env.JF_OIDC_TOKEN }}
           PROJECT_KEY: ${{ vars.PROJECT_KEY }}
         run: |
           python - << 'PY'
@@ -83,7 +83,7 @@ jobs:
           from urllib.error import HTTPError, URLError
           # Base API and auth
           base = (os.environ.get("JFROG_URL", "").rstrip('/') + "/apptrust/api/v1").rstrip('/')
-          token = os.environ.get("JFROG_ADMIN_TOKEN", "")
+          token = os.environ.get("JF_OIDC_TOKEN", "")
           app = "bookverse-platform"
           # Resolve inputs
           input_version = os.environ.get("INPUT_VERSION", "${{ github.event.inputs.version }}").strip()
@@ -155,7 +155,7 @@ jobs:
           if ! command -v jq >/dev/null 2>&1; then sudo apt-get update -y && sudo apt-get install -y jq; fi
           APP_KEY="bookverse-platform"
           BASE="${{ vars.JFROG_URL }}/apptrust/api/v1"
-          TOKEN="$JF_ACCESS_TOKEN"
+          TOKEN="$JF_OIDC_TOKEN"
           RESP=$(mktemp)
           code=$(curl -sS -L -o "$RESP" -w "%{http_code}" \
             "$BASE/applications/$APP_KEY/versions?limit=1000&order_by=created&order_asc=false" \
