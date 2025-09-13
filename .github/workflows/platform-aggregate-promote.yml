@@ -137,8 +137,8 @@ jobs:
           
           # Use the exchanged OIDC token for API calls
           JF_ACCESS_TOKEN="${{ steps.exchange-oidc.outputs.token }}"
-          BASE="${{ vars.JFROG_URL }}"
-          BASE="${BASE%/}"
+          BASE_URL="${{ vars.JFROG_URL }}"
+          BASE_URL="${BASE_URL%/}"
           
           # Create Python script to collect versions
           cat > collect_versions.py << 'EOF'
