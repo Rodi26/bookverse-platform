@@ -1,22 +1,36 @@
-# AppTrust rollback for platform version
 name: Rollback
+
+# Documentation:
+# This workflow performs a rollback of an application version using the
+# dedicated AppTrust rollback API. High-level flow:
+# 1) Exchange GitHub OIDC ID token for JFrog access token (no secrets required)
+# 2) Resolve the target version (input or latest promoted) using minted token
+# 3) Capture BEFORE current_stage via Content API using minted token
+# 4) Execute rollback via scripts/apptrust_rollback.py, which calls:
+#    POST /apptrust/api/v1/applications/{app}/versions/{ver}/rollback
+#    with body { from_stage: "PROD" } using minted token (PROD for safety)
+# 5) Capture AFTER current_stage and compute expected previous stage using the
+#    lifecycle definition (bookverse-lifecycle or default DEV→QA→STAGING→PROD)
+# 6) Validate: stage_after must equal previous(stage_before)
+# 7) Summarize and fail the job if validation fails
+# 
+# Authentication: Uses OIDC token exchange
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to rollback (SemVer). Omit to use latest promoted"
+        description: "Version (SemVer) to rollback (omit to use latest promoted)"
         required: false
         type: string
-      dry_run:
-        description: "Dry run (no mutations)"
-        required: false
-        default: false
-        type: boolean
+
+concurrency:
+  group: promotion-rollback-${{ github.event.repository.name }}
+  cancel-in-progress: false
 
 jobs:
   rollback:
-    name: Rollback
+    name: Rollback ${{ github.event.repository.name }} ${{ inputs.version || 'latest-promoted' }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -24,28 +38,38 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    env:
-      JFROG_URL: ${{ vars.JFROG_URL }}
     steps:
       - name: "[Setup] Checkout"
         uses: actions/checkout@v4
 
-      - name: "[Auth] Persist JF access token (OIDC → JFrog)"
-        env:
-          JF_URL: ${{ vars.JFROG_URL }}
-          PROJECT: ${{ vars.PROJECT_KEY }}
-          PROVIDER_NAME: bookverse-platform-github
+
+      - name: "[Setup] Prereqs (jq)"
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+
+      - name: "[Setup] Python"
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: "[Auth] Exchange GitHub OIDC for JFrog access token"
         run: |
           set -euo pipefail
-          if ! command -v jq >/dev/null 2>&1; then sudo apt-get update -y && sudo apt-get install -y jq; fi
+          BASE="${{ vars.JFROG_URL }}"; BASE="${BASE%/}"
+          if [[ -z "$BASE" ]]; then echo "Missing vars.JFROG_URL" >&2; exit 1; fi
+          PROVIDER_NAME="bookverse-platform-github"
+          # Mint GitHub OIDC ID token with audience = JFrog URL (align with CI workflow)
+          JF_URL="$BASE"
           if [[ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" || -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]]; then
             echo "❌ Missing GitHub OIDC request env vars" >&2; exit 1; fi
-          GH_ID_TOKEN=$(curl -sS -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${JF_URL}" | jq -r .value)
-          if [[ -z "$GH_ID_TOKEN" || "$GH_ID_TOKEN" == "null" ]]; then echo "❌ Failed to fetch GitHub ID token" >&2; exit 1; fi
-          PAYLOAD=$(jq -n --arg jwt "$GH_ID_TOKEN" \
+          echo "🔑 Minting GitHub OIDC ID token (audience=$JF_URL)"
+          ID_TOKEN=$(curl -fsSL -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${JF_URL}" | jq -r .value)
+          if [[ -z "$ID_TOKEN" || "$ID_TOKEN" == "null" ]]; then echo "❌ Failed to fetch GitHub ID token" >&2; exit 1; fi
+          echo "🔁 Exchanging OIDC for JFrog access token (provider=$PROVIDER_NAME)"
+          PAYLOAD=$(jq -n --arg jwt "$ID_TOKEN" \
             --arg provider_name "$PROVIDER_NAME" \
-            --arg project_key "$PROJECT" \
+            --arg project_key "${{ vars.PROJECT_KEY }}" \
             --arg job_id "${{ github.job }}" \
             --arg run_id "${{ github.run_id }}" \
             --arg repo "https://github.com/${{ github.repository }}" \
@@ -63,59 +87,43 @@ jobs:
               revision:$revision,
               branch:$branch
             }')
-          TOKEN=$(curl -sS -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$JF_URL/access/api/v1/oidc/token" | jq -r .access_token)
-          if [[ -z "$TOKEN" || "$TOKEN" == "null" ]]; then echo "❌ Failed to exchange OIDC token" >&2; exit 1; fi
-          echo "JF_OIDC_TOKEN=$TOKEN" >> $GITHUB_ENV
+          RESP=$(curl -fsSL -X POST "$JF_URL/access/api/v1/oidc/token" -H "Content-Type: application/json" -d "$PAYLOAD")
+          APPTRUST_ACCESS_TOKEN=$(echo "$RESP" | jq -er '.access_token // empty' || true)
+          if [[ -z "$APPTRUST_ACCESS_TOKEN" ]]; then echo "Failed to obtain JFrog access token: $RESP" >&2; exit 1; fi
+          echo "APPTRUST_ACCESS_TOKEN=$APPTRUST_ACCESS_TOKEN" >> $GITHUB_ENV
 
-      - name: "[Setup] AppTrust context"
-        run: |
-          BASE="${JFROG_URL%/}"
-          echo "APPTRUST_BASE_URL=${BASE}/apptrust/api/v1" >> "$GITHUB_ENV"
-          echo "APPTRUST_ACCESS_TOKEN=${JF_OIDC_TOKEN}" >> "$GITHUB_ENV"
-
-      - name: "[Setup] Python"
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: Setup JFrog CLI
-        # uses: jfrog/setup-jfrog-cli@v4
+      - name: "[Setup] JFrog CLI"
         uses: EyalDelarea/setup-jfrog-cli@swampUpAppTrust
-        with:
-          version: latest
-          oidc-provider-name: bookverse-platform-github
-          oidc-audience: ${{ vars.JFROG_URL }}
-          disable-job-summary: true
-          disable-auto-build-publish: true
-          disable-auto-evidence-collection: false
         env:
           JF_URL: ${{ vars.JFROG_URL }}
           JF_PROJECT: ${{ vars.PROJECT_KEY }}
+        with:
+          version: latest
+          oidc-provider-name: bookverse-platform-github
+          disable-job-summary: true
+          oidc-audience: ${{ vars.JFROG_URL }}
 
-      - name: "[Configure] JFrog server (OIDC)"
-        run: |
-          jf c add --interactive=false --url "${{ vars.JFROG_URL }}" --access-token "$JF_OIDC_TOKEN"
-
-      - name: "[Preflight] Validate environment"
-        run: |
-          which jf
-          jf -v || true
-          python -V
-          ls -la
-          test -f scripts/apptrust_rollback.py
-          echo "OK: preflight"
-
-      - name: "[Resolve] Target version"
+      - name: "[Rollback] Execute"
         shell: bash
         run: |
           set -euo pipefail
-          TARGET_VERSION="${{ github.event.inputs.version }}"
-          if [ -z "${TARGET_VERSION}" ]; then
-            APP_KEY="bookverse-platform"
+          echo "🧭 Starting rollback workflow"
+          APPTRUST_BASE_URL="/apptrust/api/v1"
+
+          # Derive application key from repo name (e.g., bookverse-platform -> bookverse-platform)
+          SERVICE_NAME=$(echo "${GITHUB_REPOSITORY#*/}" | sed 's/bookverse-//')
+          APP_KEY="bookverse-$SERVICE_NAME"
+          echo "📦 Application: $APP_KEY"
+          # Persist for later steps
+          echo "APPLICATION_KEY=$APP_KEY" >> $GITHUB_ENV
+
+          # Determine target version: use input if provided, else resolve latest promoted
+          TARGET_VERSION="${{ inputs.version || '' }}"
+          if [ -z "$TARGET_VERSION" ]; then
+            echo "🔎 Resolving latest promoted version for $APP_KEY"
             RESP_FILE=$(mktemp)
-            HTTP_STATUS=$(curl -sS -o "$RESP_FILE" -w "%{http_code}" \
-              "$APPTRUST_BASE_URL/applications/$APP_KEY/versions?limit=20&order_by=created&order_asc=false" \
+            HTTP_STATUS=$(curl -sS -L -o "$RESP_FILE" -w "%{http_code}" \
+              "${{ vars.JFROG_URL }}$APPTRUST_BASE_URL/applications/$APP_KEY/versions?limit=20&order_by=created&order_asc=false" \
               -H "Authorization: Bearer $APPTRUST_ACCESS_TOKEN" \
               -H "Accept: application/json")
             if [[ "$HTTP_STATUS" -ge 200 && "$HTTP_STATUS" -lt 300 ]]; then
@@ -130,31 +138,19 @@ jobs:
             fi
             rm -f "$RESP_FILE"
             if [ -z "${TARGET_VERSION:-}" ] || [ "$TARGET_VERSION" = "null" ]; then
-              echo "Could not resolve latest promoted version for $APP_KEY" >&2
+              echo "❌ Could not resolve latest promoted version for $APP_KEY" >&2
               exit 1
             fi
-            echo "Resolved target version: $TARGET_VERSION"
+            echo "🎯 Defaulting to latest promoted version: $TARGET_VERSION"
           fi
+          # Persist TARGET_VERSION for later steps
           echo "TARGET_VERSION=$TARGET_VERSION" >> $GITHUB_ENV
-
-      - name: "[Dry Run] Validate only"
-        if: ${{ inputs.dry_run == true }}
-        run: |
-          echo "DRY RUN: Would invoke rollback for version ${TARGET_VERSION}"
-
-      - name: "[Rollback] Execute"
-        if: ${{ inputs.dry_run != true }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "🧭 Starting rollback workflow"
-          APP_KEY="bookverse-platform"
 
           # Snapshot BEFORE stage via content API
           CONTENT_BEFORE=$(mktemp)
           CODE_B=$(curl -sS -L -o "$CONTENT_BEFORE" -w "%{http_code}" \
             -H "Authorization: Bearer $APPTRUST_ACCESS_TOKEN" -H "Accept: application/json" \
-            "$APPTRUST_BASE_URL/applications/$APP_KEY/versions/$TARGET_VERSION/content" || echo 000)
+            "${{ vars.JFROG_URL }}$APPTRUST_BASE_URL/applications/$APP_KEY/versions/$TARGET_VERSION/content" || echo 000)
           CURRENT_STAGE_BEFORE=""
           if [[ "$CODE_B" -ge 200 && "$CODE_B" -lt 300 ]]; then
             CURRENT_STAGE_BEFORE=$(jq -r '.current_stage // empty' "$CONTENT_BEFORE" 2>/dev/null || echo "")
@@ -165,22 +161,17 @@ jobs:
 
           STATUS="SUCCESS"
           MSG=""
-          echo "🔁 Executing rollback via AppTrust rollback API"
-          # Call JFrog AppTrust rollback API to perform stage rollback
-          from_stage="PROD"  # Always rollback from PROD for safety
-          echo "Calling AppTrust endpoint: POST /applications/$APP_KEY/versions/$TARGET_VERSION/rollback with body {from_stage: $from_stage}"
-          if curl -sS -L -X POST \
-            "$APPTRUST_BASE_URL/applications/$APP_KEY/versions/$TARGET_VERSION/rollback" \
-            -H "Authorization: Bearer $APPTRUST_ACCESS_TOKEN" \
-            -H "Content-Type: application/json" \
-            -H "Accept: application/json" \
-            -d "{\"from_stage\": \"$from_stage\"}" --fail; then
-            MSG="Rollback executed for $APP_KEY@$TARGET_VERSION from $from_stage"
-            echo "✅ $MSG"
+          echo "🔁 Executing rollback via scripts/apptrust_rollback.py"
+          # Set environment variables for the rollback script to use minted token
+          export APPTRUST_BASE_URL="${{ vars.JFROG_URL }}$APPTRUST_BASE_URL"
+          export APPTRUST_ACCESS_TOKEN="$APPTRUST_ACCESS_TOKEN"
+          if python3 scripts/apptrust_rollback.py \
+            --app "$APP_KEY" \
+            --version "$TARGET_VERSION"; then
+            MSG="Rollback executed for $APP_KEY@$TARGET_VERSION"
           else
             STATUS="FAILED"
             MSG="Rollback failed for $APP_KEY@$TARGET_VERSION"
-            echo "❌ $MSG"
           fi
 
           # Fetch AFTER stage via content API
@@ -196,71 +187,45 @@ jobs:
           echo "📍 Stage AFTER:  ${CURR_STAGE_TARGET:-unknown}"
           echo "CURR_STAGE_TARGET=${CURR_STAGE_TARGET:-}" >> $GITHUB_ENV
 
-      - name: "[Tags] Mark rolled back version as Quarantine"
-        if: ${{ inputs.dry_run != true }}
-        run: |
-          set -euo pipefail
-          if ! command -v jq >/dev/null 2>&1; then sudo apt-get update -y && sudo apt-get install -y jq; fi
-          APP_KEY="bookverse-platform"
-          BASE="${{ vars.JFROG_URL }}/apptrust/api/v1"
-          TOKEN="$JF_OIDC_TOKEN"
-          ROLLBACK_VERSION="$TARGET_VERSION"
-          
-          # Generate quarantine tag with timestamp
-          QUARANTINE_TAG="Quarantine-$(date -u +%Y%m%d-%H%M%S)"
-          echo "🚨 Marking rolled back version $ROLLBACK_VERSION with quarantine tag: $QUARANTINE_TAG"
-          
-          # Set quarantine tag for the rolled back version  
-          jq -n --arg tag "$QUARANTINE_TAG" '{tag: $tag, delete_properties: ["original_tag_before_latest"]}' > quarantine_body.json
-          curl -sS -L -X PATCH "$BASE/applications/$APP_KEY/versions/$ROLLBACK_VERSION" \
-            -H "Authorization: Bearer $TOKEN" \
-            -H "Content-Type: application/json" \
-            -d @quarantine_body.json | cat
-          rm -f quarantine_body.json || true
-          echo "✅ Quarantine tag set for rolled back version $ROLLBACK_VERSION"
-
       - name: "[Tags] Enforce PROD 'latest' invariants"
-        if: ${{ inputs.dry_run != true }}
         run: |
           set -euo pipefail
           if ! command -v jq >/dev/null 2>&1; then sudo apt-get update -y && sudo apt-get install -y jq; fi
-          APP_KEY="bookverse-platform"
+          APP_KEY="$APPLICATION_KEY"
           BASE="${{ vars.JFROG_URL }}/apptrust/api/v1"
-          TOKEN="$JF_OIDC_TOKEN"
-          RESP=$(mktemp)
-          code=$(curl -sS -L -o "$RESP" -w "%{http_code}" \
+          RESP_FILE=$(mktemp)
+          HTTP_STATUS=$(curl -sS -L -o "$RESP_FILE" -w "%{http_code}" \
             "$BASE/applications/$APP_KEY/versions?limit=1000&order_by=created&order_asc=false" \
-            -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" || echo 000)
-          if [[ "$code" -lt 200 || "$code" -ge 300 ]]; then
-            echo "❌ Failed to list versions (HTTP $code)" >&2; cat "$RESP" || true; exit 1
+            -H "Authorization: Bearer $APPTRUST_ACCESS_TOKEN" \
+            -H "Accept: application/json")
+          DESIRED=""
+          if [[ "$HTTP_STATUS" -ge 200 && "$HTTP_STATUS" -lt 300 ]]; then
+            DESIRED=$(jq -r '[.versions[] | select((.release_status|tostring|ascii_upcase)=="RELEASED" or (.release_status|tostring|ascii_upcase)=="TRUSTED_RELEASE") | .version] | unique | map(select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))) | sort_by(split(".")|map(tonumber)) | last // empty' "$RESP_FILE")
           fi
-          DESIRED=$(jq -r '[.versions[] | select((.release_status|tostring|ascii_upcase)=="RELEASED" or (.release_status|tostring|ascii_upcase)=="TRUSTED_RELEASE") | .version] | unique | map(select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))) | sort_by(split(".")|map(tonumber)) | last // empty' "$RESP")
           if [[ -n "$DESIRED" ]]; then
-            CURR_TAG=$(jq -r --arg v "$DESIRED" '.versions[] | select(.version==$v) | (.tag // "")' "$RESP")
+            CURR_TAG=$(jq -r --arg v "$DESIRED" '.versions[] | select(.version==$v) | (.tag // "")' "$RESP_FILE")
             jq -n --arg ct "$CURR_TAG" '{tag:"latest", properties:{original_tag_before_latest:[$ct]}}' > body.json
-            curl -sS -L -X PATCH "$BASE/applications/$APP_KEY/versions/$DESIRED" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d @body.json | cat
+            curl -sS -L -X PATCH "$BASE/applications/$APP_KEY/versions/$DESIRED" \
+              -H "Authorization: Bearer $APPTRUST_ACCESS_TOKEN" \
+              -H "Content-Type: application/json" -d @body.json | cat
           fi
-          mapfile -t OTHERS < <(jq -r --arg v "$DESIRED" '.versions[] | select(.tag=="latest" and .version!=$v) | .version' "$RESP")
+          mapfile -t OTHERS < <(jq -r --arg v "$DESIRED" '.versions[] | select(.tag=="latest" and .version!=$v) | .version' "$RESP_FILE")
           for ov in "${OTHERS[@]:-}"; do
             [ -z "$ov" ] && continue
-            restore=$(jq -r --arg v "$ov" '.versions[] | select(.version==$v) | (.properties.original_tag_before_latest[0] // .version // "")' "$RESP")
+            restore=$(jq -r --arg v "$ov" '.versions[] | select(.version==$v) | (.properties.original_tag_before_latest[0] // .version // "")' "$RESP_FILE")
             printf '{"tag":"%s","delete_properties":["original_tag_before_latest"]}' "$restore" > body.json
-            curl -sS -L -X PATCH "$BASE/applications/$APP_KEY/versions/$ov" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d @body.json | cat
+            curl -sS -L -X PATCH "$BASE/applications/$APP_KEY/versions/$ov" \
+              -H "Authorization: Bearer $APPTRUST_ACCESS_TOKEN" \
+              -H "Content-Type: application/json" -d @body.json | cat
           done
-          rm -f "$RESP" body.json || true
+          rm -f "$RESP_FILE" body.json || true
 
-      - name: "[Validation] Check rollback success"
-        if: ${{ inputs.dry_run != true }}
-        run: |
-          set -euo pipefail
-          if ! command -v jq >/dev/null 2>&1; then sudo apt-get update -y && sudo apt-get install -y jq; fi
-          
           # Determine lifecycle stages to compute expected previous stage
           PROJECT_KEY_ENV="${{ vars.PROJECT_KEY }}"
           LC_FILE=$(mktemp)
           PLATFORM_URL="${{ vars.JFROG_URL }}"
           CODE_LC=$(curl -sS -L -o "$LC_FILE" -w "%{http_code}" \
-            -H "Authorization: Bearer $JF_OIDC_TOKEN" -H "Accept: application/json" \
+            -H "Authorization: Bearer $APPTRUST_ACCESS_TOKEN" -H "Accept: application/json" \
             "$PLATFORM_URL/access/api/v2/lifecycle/?project_key=$PROJECT_KEY_ENV" || echo 000)
           NORM_FILE=$(mktemp)
           if [[ "$CODE_LC" -ge 200 && "$CODE_LC" -lt 300 ]]; then
@@ -284,7 +249,6 @@ jobs:
             STAGES=(DEV QA STAGING PROD)
           fi
           echo "🧭 Lifecycle stages: ${STAGES[*]}"
-          
           # Compute expected previous stage
           display_stage() {
             local x="$1"; local p="$PROJECT_KEY_ENV"; if [[ "$x" == "PROD" || "$x" == "$p-PROD" ]]; then echo "PROD"; elif [[ "$x" == "$p-"* ]]; then echo "${x#${p}-}"; else echo "$x"; fi
@@ -307,17 +271,17 @@ jobs:
 
           # Finalize validation status after all checks
           STATUS="SUCCESS"
-          MSG="Rollback executed for bookverse-platform@${TARGET_VERSION}"
+          MSG="Rollback executed for ${APPLICATION_KEY}@${TARGET_VERSION}"
           if [ ${#VALIDATION_ERRORS[@]} -gt 0 ]; then
             STATUS="FAILED"
             MSG="Validation failed: ${VALIDATION_ERRORS[*]}"
           fi
 
           {
-            echo "## 🔄 Platform Rollback"
+            echo "## 🔄 Promotion Rollback"
             echo ""
             echo "**Repository:** \`${{ github.repository }}\`"
-            echo "**Application:** \`bookverse-platform\`"
+            echo "**Application:** \`$APP_KEY\`"
             echo "**Target Version:** \`${TARGET_VERSION:-unknown}\`"
             echo "**Status:** ${STATUS}"
             echo ""

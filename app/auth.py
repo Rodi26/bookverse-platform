@@ -12,7 +12,7 @@ from datetime import datetime
 
 from fastapi import HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import jwt, JWTError
+from bookverse_core.auth import AuthUser, validate_jwt_token
 import requests
 
 logger = logging.getLogger(__name__)
@@ -33,27 +33,7 @@ JWKS_CACHE_DURATION = 3600  # 1 hour in seconds
 security = HTTPBearer(auto_error=False)
 
 
-class AuthUser:
-    """Represents an authenticated user with claims from JWT token"""
-    
-    def __init__(self, token_claims: dict):
-        self.claims = token_claims
-        self.user_id = token_claims.get("sub")
-        self.email = token_claims.get("email")
-        self.name = token_claims.get("name", self.email)
-        self.roles = token_claims.get("roles", [])
-        self.scopes = token_claims.get("scope", "").split()
-    
-    def has_scope(self, scope: str) -> bool:
-        """Check if user has a specific scope"""
-        return scope in self.scopes
-    
-    def has_role(self, role: str) -> bool:
-        """Check if user has a specific role"""
-        return role in self.roles
-    
-    def __str__(self):
-        return f"AuthUser(id={self.user_id}, email={self.email})"
+# AuthUser class now imported from bookverse_core.auth
 
 
 async def get_oidc_configuration() -> dict:
@@ -126,53 +106,7 @@ def get_public_key(token_header: dict, jwks: dict) -> str:
     raise ValueError(f"No matching key found for kid: {kid}")
 
 
-async def validate_jwt_token(token: str) -> AuthUser:
-    """Validate JWT token and return authenticated user"""
-    try:
-        # Decode header to get key ID
-        header = jwt.get_unverified_header(token)
-        
-        # Get JWKS for key validation
-        jwks = await get_jwks()
-        
-        # Find the correct public key
-        public_key = get_public_key(header, jwks)
-        
-        # Verify and decode the token
-        claims = jwt.decode(
-            token,
-            public_key,
-            algorithms=[JWT_ALGORITHM],
-            audience=OIDC_AUDIENCE,
-            issuer=OIDC_AUTHORITY
-        )
-        
-        # Validate required claims
-        if not claims.get("sub"):
-            raise ValueError("Token missing 'sub' claim")
-        
-        # Check if token has required scope
-        scopes = claims.get("scope", "").split()
-        if "bookverse:api" not in scopes:
-            raise ValueError("Token missing required 'bookverse:api' scope")
-        
-        logger.debug(f"✅ Token validated for user: {claims.get('email', claims.get('sub'))}")
-        return AuthUser(claims)
-        
-    except JWTError as e:
-        logger.warning(f"⚠️ JWT validation failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication token",
-            headers={"WWW-Authenticate": "Bearer"}
-        )
-    except Exception as e:
-        logger.error(f"❌ Token validation error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication failed",
-            headers={"WWW-Authenticate": "Bearer"}
-        )
+# validate_jwt_token function now imported from bookverse_core.auth
 
 
 async def get_current_user(
