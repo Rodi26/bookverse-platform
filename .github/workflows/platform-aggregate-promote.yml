@@ -46,39 +46,76 @@ on:
         type: string
 
 jobs:
-  # Use shared authentication workflow
-  authenticate:
-    name: "Platform Authentication"
+  aggregate:
+    name: "Platform Aggregation"
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/shared-platform-auth.yml
-    with:
-      service-name: "aggregate-promote"
-      setup-python: true
-      python-version: "3.11"
-      install-dependencies: true
-      setup-apptrust: true
-
-  aggregate:
-    name: "Platform Aggregation"
-    needs: authenticate
-    runs-on: ubuntu-latest
     outputs:
       platform_version: ${{ steps.create-version.outputs.platform_version }}
       manifest_created: ${{ steps.create-version.outputs.manifest_created }}
     defaults:
       run:
         shell: bash
-    env:
-      # Use tokens from shared authentication workflow
-      APPTRUST_BASE_URL: ${{ needs.authenticate.outputs.apptrust-base-url }}
-      APPTRUST_ACCESS_TOKEN: ${{ needs.authenticate.outputs.oidc-token }}
     steps:
       - name: "[Setup] Checkout"
         uses: actions/checkout@v4
 
-      # Note: Python, dependencies, and authentication are set up by shared workflow
+      - name: "[Setup] Python Environment"
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: "[Setup] Install Dependencies"
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: "[Auth] Exchange GitHub OIDC for JFrog access token"
+        run: |
+          set -euo pipefail
+          BASE="${{ vars.JFROG_URL }}"; BASE="${BASE%/}"
+          if [[ -z "$BASE" ]]; then echo "Missing vars.JFROG_URL" >&2; exit 1; fi
+          PROVIDER_NAME="bookverse-platform-github"
+          # Mint GitHub OIDC ID token with audience = JFrog URL (align with CI workflow)
+          JF_URL="$BASE"
+          if [[ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" || -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]]; then
+            echo "❌ Missing GitHub OIDC request env vars" >&2; exit 1; fi
+          echo "🔑 Minting GitHub OIDC ID token (audience=$JF_URL)"
+          ID_TOKEN=$(curl -fsSL -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${JF_URL}" | jq -r .value)
+          if [[ -z "$ID_TOKEN" || "$ID_TOKEN" == "null" ]]; then echo "❌ Failed to fetch GitHub ID token" >&2; exit 1; fi
+          echo "🔁 Exchanging OIDC for JFrog access token (provider=$PROVIDER_NAME)"
+          PAYLOAD=$(jq -n --arg jwt "$ID_TOKEN" \
+            --arg provider_name "$PROVIDER_NAME" \
+            --arg project_key "${{ vars.PROJECT_KEY }}" \
+            --arg job_id "${{ github.job }}" \
+            --arg run_id "${{ github.run_id }}" \
+            --arg repo "https://github.com/${{ github.repository }}" \
+            --arg revision "${{ github.sha }}" \
+            --arg branch "${{ github.ref_name }}" \
+            '{
+              grant_type:"urn:ietf:params:oauth:grant-type:token-exchange",
+              subject_token_type:"urn:ietf:params:oauth:token-type:id_token",
+              subject_token:$jwt,
+              provider_name:$provider_name,
+              project_key:$project_key,
+              job_id:$job_id,
+              run_id:$run_id,
+              repo:$repo,
+              revision:$revision,
+              branch:$branch
+            }')
+          RESP=$(curl -fsSL -X POST "$JF_URL/access/api/v1/oidc/token" -H "Content-Type: application/json" -d "$PAYLOAD")
+          APPTRUST_ACCESS_TOKEN=$(echo "$RESP" | jq -er '.access_token // empty' || true)
+          if [[ -z "$APPTRUST_ACCESS_TOKEN" ]]; then echo "Failed to obtain JFrog access token: $RESP" >&2; exit 1; fi
+          echo "APPTRUST_ACCESS_TOKEN=$APPTRUST_ACCESS_TOKEN" >> $GITHUB_ENV
+          # Also set up AppTrust base URL
+          APPTRUST_BASE_URL="${BASE}/apptrust/api/v1"
+          echo "APPTRUST_BASE_URL=$APPTRUST_BASE_URL" >> $GITHUB_ENV
 
       - name: "[Run] Create version and write manifest"
         id: collect-versions
