@@ -84,7 +84,6 @@ jobs:
             --service-name "platform" \
             --provider-name "bookverse-platform-github" \
             --jfrog-url "${{ vars.JFROG_URL }}" \
-            --docker-registry "${{ vars.DOCKER_REGISTRY }}" \
             --verbose
           echo "✅ OIDC token exchange completed using shared bookverse-devops script"
 
@@ -95,6 +94,9 @@ jobs:
 
       - name: "[Run] Create version and write manifest"
         id: collect-versions
+        env:
+          APPTRUST_BASE_URL: "${{ vars.JFROG_URL }}/apptrust/api/v1"
+          APPTRUST_ACCESS_TOKEN: "${{ steps.exchange-oidc.outputs.token }}"
         run: |
           set -euo pipefail
           ARGS="--config config/services.yaml --output-dir manifests --source-stage PROD"
@@ -163,7 +165,6 @@ jobs:
             --service-name "platform" \
             --provider-name "bookverse-platform-github" \
             --jfrog-url "${{ vars.JFROG_URL }}" \
-            --docker-registry "${{ vars.DOCKER_REGISTRY }}" \
             --verbose
           echo "✅ OIDC token exchange completed using shared bookverse-devops script"
 
