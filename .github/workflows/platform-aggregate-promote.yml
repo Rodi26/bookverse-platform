@@ -110,9 +110,9 @@ jobs:
               branch:$branch
             }')
           RESP=$(curl -fsSL -X POST "$JF_URL/access/api/v1/oidc/token" -H "Content-Type: application/json" -d "$PAYLOAD")
-          APPTRUST_ACCESS_TOKEN=$(echo "$RESP" | jq -er '.access_token // empty' || true)
-          if [[ -z "$APPTRUST_ACCESS_TOKEN" ]]; then echo "Failed to obtain JFrog access token: $RESP" >&2; exit 1; fi
-          echo "APPTRUST_ACCESS_TOKEN=$APPTRUST_ACCESS_TOKEN" >> $GITHUB_ENV
+          JF_OIDC_TOKEN=$(echo "$RESP" | jq -er '.access_token // empty' || true)
+          if [[ -z "$JF_OIDC_TOKEN" ]]; then echo "Failed to obtain JFrog access token: $RESP" >&2; exit 1; fi
+          echo "JF_OIDC_TOKEN=$JF_OIDC_TOKEN" >> $GITHUB_ENV
           # Also set up AppTrust base URL
           APPTRUST_BASE_URL="${BASE}/apptrust/api/v1"
           echo "APPTRUST_BASE_URL=$APPTRUST_BASE_URL" >> $GITHUB_ENV
@@ -176,6 +176,13 @@ jobs:
       - name: "[Setup] Checkout"
         uses: actions/checkout@v4
 
+      - name: "[Setup] Checkout bookverse-infra for shared promotion library"
+        uses: actions/checkout@v4
+        with:
+          repository: 'yonatanp-jfrog/bookverse-infra'
+          ref: 'main'
+          path: 'bookverse-infra'
+
       - name: "[Auth] Persist JF access token (OIDC → JFrog)"
         id: exchange-oidc
         env:
@@ -235,7 +242,7 @@ jobs:
           APP_VERSION: "${{ needs.aggregate.outputs.platform_version }}"
           JFROG_URL: "${{ vars.JFROG_URL }}"
           PROJECT_KEY: "${{ vars.PROJECT_KEY }}"
-          APPTRUST_ACCESS_TOKEN: "${{ steps.exchange-oidc.outputs.token }}"
+          JF_OIDC_TOKEN: "${{ steps.exchange-oidc.outputs.token }}"
           STAGES_STR: "DEV QA STAGING"
           FINAL_STAGE: "STAGING"
           ALLOW_RELEASE: "false"
@@ -244,8 +251,8 @@ jobs:
           echo "🚀 Auto-promoting platform through stages to STAGING..."
           echo "ℹ️  Note: PROD release is handled by separate workflow by design"
           
-          # Source the promotion library
-          source .github/scripts/promote_lib.sh
+          # Source the shared promotion library
+          source bookverse-infra/libraries/bookverse-devops/scripts/promote-lib.sh
           
           PLATFORM_VERSION="${{ needs.aggregate.outputs.platform_version }}"
           
