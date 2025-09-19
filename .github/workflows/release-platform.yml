@@ -126,8 +126,7 @@ jobs:
                   headers={
                     "Authorization": f"Bearer {token}", 
                     "Content-Type": "application/json",
-                    "Accept": "application/json",
-                    "X-JFrog-Project": project_key
+                    "Accept": "application/json"
                   }
                 )
                 try:
@@ -199,7 +198,7 @@ jobs:
             try:
               req = urllib.request.Request(
                 url=f"{jf_url}/artifactory/api/repositories/{key}",
-                headers={"Authorization": f"Bearer {token}", "Accept": "application/json", "X-JFrog-Project": project},
+                headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
               )
               with urllib.request.urlopen(req, timeout=20) as resp:
                 if 200 <= resp.status < 300:
