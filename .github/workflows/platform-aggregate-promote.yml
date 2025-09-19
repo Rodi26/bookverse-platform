@@ -179,6 +179,13 @@ jobs:
           pip install --user PyYAML setuptools wheel
           echo "✅ Python dependencies installed"
 
+      - name: "[Setup] JFrog CLI"
+        uses: EyalDelarea/setup-jfrog-cli@swampUpAppTrust
+
+      - name: "[Setup] Configure JFrog CLI"
+        run: |
+          jf c add --interactive=false --url "${{ vars.JFROG_URL }}" --access-token ""
+          echo "✅ JFrog CLI configured"
 
       - name: "[Setup] Promotion Environment"
         env:
