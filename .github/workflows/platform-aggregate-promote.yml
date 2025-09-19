@@ -113,6 +113,8 @@ jobs:
           JF_OIDC_TOKEN=$(echo "$RESP" | jq -er '.access_token // empty' || true)
           if [[ -z "$JF_OIDC_TOKEN" ]]; then echo "Failed to obtain JFrog access token: $RESP" >&2; exit 1; fi
           echo "JF_OIDC_TOKEN=$JF_OIDC_TOKEN" >> $GITHUB_ENV
+          # Platform app expects APPTRUST_ACCESS_TOKEN, so set both for compatibility
+          echo "APPTRUST_ACCESS_TOKEN=$JF_OIDC_TOKEN" >> $GITHUB_ENV
           # Also set up AppTrust base URL
           APPTRUST_BASE_URL="${BASE}/apptrust/api/v1"
           echo "APPTRUST_BASE_URL=$APPTRUST_BASE_URL" >> $GITHUB_ENV
