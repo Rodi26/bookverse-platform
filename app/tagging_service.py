@@ -487,3 +487,11 @@ async def enforce_tagging_manually(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def main():
+    """Main entry point for the tagging service"""
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+if __name__ == "__main__":
+    main()
