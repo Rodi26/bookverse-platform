@@ -195,7 +195,7 @@ jobs:
           echo "📋 Platform Version: ${{ needs.aggregate.outputs.platform_version }}"
           echo "🎯 Target: DEV → QA → STAGING (PROD handled by separate workflow)"
           
-          source bookverse-infra/libraries/bookverse-devops/scripts/promote-lib.sh
+          source bookverse-infra/libraries/bookverse-devops/scripts/evidence-lib.sh
           setup_promotion_environment
           
           echo "✅ Promotion environment initialized"
