@@ -1,21 +1,5 @@
 name: Rollback
 
-# Documentation:
-# This workflow performs a rollback of an application version using the
-# dedicated AppTrust rollback API. High-level flow:
-# 1) Exchange GitHub OIDC ID token for JFrog access token (no secrets required)
-# 2) Resolve the target version (input or latest promoted) using minted token
-# 3) Capture BEFORE current_stage via Content API using minted token
-# 4) Execute rollback via scripts/apptrust_rollback.py, which calls:
-#    POST /apptrust/api/v1/applications/{app}/versions/{ver}/rollback
-#    with body { from_stage: "PROD" } using minted token (PROD for safety)
-# 5) Capture AFTER current_stage and compute expected previous stage using the
-#    lifecycle definition (bookverse-lifecycle or default DEV→QA→STAGING→PROD)
-# 6) Validate: stage_after must equal previous(stage_before)
-# 7) Summarize and fail the job if validation fails
-# 
-# Authentication: Uses OIDC token exchange
-
 on:
   workflow_dispatch:
     inputs:
@@ -59,7 +43,6 @@ jobs:
           BASE="${{ vars.JFROG_URL }}"; BASE="${BASE%/}"
           if [[ -z "$BASE" ]]; then echo "Missing vars.JFROG_URL" >&2; exit 1; fi
           PROVIDER_NAME="bookverse-platform-github"
-          # Mint GitHub OIDC ID token with audience = JFrog URL (align with CI workflow)
           JF_URL="$BASE"
           if [[ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" || -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]]; then
             echo "❌ Missing GitHub OIDC request env vars" >&2; exit 1; fi
@@ -110,14 +93,11 @@ jobs:
           echo "🧭 Starting rollback workflow"
           APPTRUST_BASE_URL="/apptrust/api/v1"
 
-          # Derive application key from repo name (e.g., bookverse-platform -> bookverse-platform)
           SERVICE_NAME=$(echo "${GITHUB_REPOSITORY#*/}" | sed 's/bookverse-//')
           APP_KEY="bookverse-$SERVICE_NAME"
           echo "📦 Application: $APP_KEY"
-          # Persist for later steps
           echo "APPLICATION_KEY=$APP_KEY" >> $GITHUB_ENV
 
-          # Determine target version: use input if provided, else resolve latest promoted
           TARGET_VERSION="${{ inputs.version || '' }}"
           if [ -z "$TARGET_VERSION" ]; then
             echo "🔎 Resolving latest promoted version for $APP_KEY"
@@ -127,10 +107,8 @@ jobs:
               -H "Authorization: Bearer $APPTRUST_ACCESS_TOKEN" \
               -H "Accept: application/json")
             if [[ "$HTTP_STATUS" -ge 200 && "$HTTP_STATUS" -lt 300 ]]; then
-              # First try to find RELEASED or TRUSTED_RELEASE versions (preferred)
               TARGET_VERSION=$(jq -r '.versions[] | select((.release_status|tostring|ascii_upcase)=="RELEASED" or (.release_status|tostring|ascii_upcase)=="TRUSTED_RELEASE") | .version' "$RESP_FILE" | head -n1)
               
-              # If no RELEASED/TRUSTED_RELEASE versions found, try PRE_RELEASE as fallback
               if [ -z "${TARGET_VERSION:-}" ] || [ "$TARGET_VERSION" = "null" ]; then
                 echo "ℹ️ No RELEASED/TRUSTED_RELEASE versions found, using latest PRE_RELEASE version"
                 TARGET_VERSION=$(jq -r '.versions[] | select((.release_status|tostring|ascii_upcase)=="PRE_RELEASE") | .version' "$RESP_FILE" | head -n1)
@@ -143,10 +121,8 @@ jobs:
             fi
             echo "🎯 Defaulting to latest promoted version: $TARGET_VERSION"
           fi
-          # Persist TARGET_VERSION for later steps
           echo "TARGET_VERSION=$TARGET_VERSION" >> $GITHUB_ENV
 
-          # Snapshot BEFORE stage via content API
           CONTENT_BEFORE=$(mktemp)
           CODE_B=$(curl -sS -L -o "$CONTENT_BEFORE" -w "%{http_code}" \
             -H "Authorization: Bearer $APPTRUST_ACCESS_TOKEN" -H "Accept: application/json" \
@@ -162,7 +138,6 @@ jobs:
           STATUS="SUCCESS"
           MSG=""
           echo "🔁 Executing rollback via scripts/apptrust_rollback.py"
-          # Set environment variables for the rollback script to use minted token
           export APPTRUST_BASE_URL="${{ vars.JFROG_URL }}$APPTRUST_BASE_URL"
           export APPTRUST_ACCESS_TOKEN="$APPTRUST_ACCESS_TOKEN"
           if python3 scripts/apptrust_rollback.py \
@@ -174,7 +149,6 @@ jobs:
             MSG="Rollback failed for $APP_KEY@$TARGET_VERSION"
           fi
 
-          # Fetch AFTER stage via content API
           CONTENT_TARGET=$(mktemp)
           CODE_T=$(curl -sS -L -o "$CONTENT_TARGET" -w "%{http_code}" \
             -H "Authorization: Bearer $APPTRUST_ACCESS_TOKEN" -H "Accept: application/json" \
@@ -220,7 +194,6 @@ jobs:
           done
           rm -f "$RESP_FILE" body.json || true
 
-          # Determine lifecycle stages to compute expected previous stage
           PROJECT_KEY_ENV="${{ vars.PROJECT_KEY }}"
           LC_FILE=$(mktemp)
           PLATFORM_URL="${{ vars.JFROG_URL }}"
@@ -245,11 +218,10 @@ jobs:
             STAGES+=("$s_disp")
           done < <(jq -r --arg n "$LIFECYCLE_NAME" '([ .[] | select(.name==$n) | .stages ] | .[0] // []) | map(if type=="object" then .name else . end) | .[]' "$NORM_FILE" 2>/dev/null)
           rm -f "$NORM_FILE"
-          if [[ ${#STAGES[@]} -eq 0 ]]; then
+          if [[ ${
             STAGES=(DEV QA STAGING PROD)
           fi
           echo "🧭 Lifecycle stages: ${STAGES[*]}"
-          # Compute expected previous stage
           display_stage() {
             local x="$1"; local p="$PROJECT_KEY_ENV"; if [[ "$x" == "PROD" || "$x" == "$p-PROD" ]]; then echo "PROD"; elif [[ "$x" == "$p-"* ]]; then echo "${x#${p}-}"; else echo "$x"; fi
           }
@@ -269,10 +241,9 @@ jobs:
             VALIDATION_ERRORS+=("Stage after rollback '$CURR_AFTER_DISP' != expected '$EXPECTED_PREV'")
           fi
 
-          # Finalize validation status after all checks
           STATUS="SUCCESS"
           MSG="Rollback executed for ${APPLICATION_KEY}@${TARGET_VERSION}"
-          if [ ${#VALIDATION_ERRORS[@]} -gt 0 ]; then
+          if [ ${
             STATUS="FAILED"
             MSG="Validation failed: ${VALIDATION_ERRORS[*]}"
           fi
@@ -303,7 +274,6 @@ jobs:
             echo "${MSG}"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          # Fail the job if validation failed
           if [ "$STATUS" = "FAILED" ]; then
             echo "${MSG}" >&2
             exit 1

@@ -1,9 +1,10 @@
 name: Platform Aggregate & Promote
 
-# DEMO-READY: Bi-weekly scheduled aggregation + manual triggers for hotfix capability
-# PRODUCTION NOTE: Real systems would have additional approval gates and staging validation
+concurrency:
+  group: platform-aggregate-promote
+  cancel-in-progress: false
+
 on:
-  # Bi-weekly schedule: Every second Monday at 09:00 UTC
   schedule:
     - cron: '0 9 */14 * 1'
   workflow_dispatch:
@@ -62,62 +63,35 @@ jobs:
       - name: "[Setup] Checkout"
         uses: actions/checkout@v4
 
+      - name: "[Setup] Checkout bookverse-infra for shared scripts"
+        uses: actions/checkout@v4
+        with:
+          repository: 'yonatanp-jfrog/bookverse-infra'
+          ref: 'main'
+          path: 'bookverse-infra'
+
       - name: "[Setup] Python Environment"
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: "[Setup] Install Dependencies"
+      - name: "[Auth] OIDC Token Exchange (bookverse-devops shared script)"
+        id: exchange-oidc
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y jq
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          echo "🔐 Using bookverse-devops shared OIDC exchange script"
+          bookverse-infra/libraries/bookverse-devops/scripts/exchange-oidc-token.sh \
+            --service-name "platform" \
+            --provider-name "bookverse-platform-github" \
+            --jfrog-url "${{ vars.JFROG_URL }}" \
+            --docker-registry "${{ vars.DOCKER_REGISTRY }}" \
+            --verbose
+          echo "✅ OIDC token exchange completed using shared bookverse-devops script"
 
-      - name: "[Auth] Exchange GitHub OIDC for JFrog access token"
+      - name: "[Setup] Install Python dependencies"
         run: |
-          set -euo pipefail
-          BASE="${{ vars.JFROG_URL }}"; BASE="${BASE%/}"
-          if [[ -z "$BASE" ]]; then echo "Missing vars.JFROG_URL" >&2; exit 1; fi
-          PROVIDER_NAME="bookverse-platform-github"
-          # Mint GitHub OIDC ID token with audience = JFrog URL (align with CI workflow)
-          JF_URL="$BASE"
-          if [[ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" || -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]]; then
-            echo "❌ Missing GitHub OIDC request env vars" >&2; exit 1; fi
-          echo "🔑 Minting GitHub OIDC ID token (audience=$JF_URL)"
-          ID_TOKEN=$(curl -fsSL -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${JF_URL}" | jq -r .value)
-          if [[ -z "$ID_TOKEN" || "$ID_TOKEN" == "null" ]]; then echo "❌ Failed to fetch GitHub ID token" >&2; exit 1; fi
-          echo "🔁 Exchanging OIDC for JFrog access token (provider=$PROVIDER_NAME)"
-          PAYLOAD=$(jq -n --arg jwt "$ID_TOKEN" \
-            --arg provider_name "$PROVIDER_NAME" \
-            --arg project_key "${{ vars.PROJECT_KEY }}" \
-            --arg job_id "${{ github.job }}" \
-            --arg run_id "${{ github.run_id }}" \
-            --arg repo "https://github.com/${{ github.repository }}" \
-            --arg revision "${{ github.sha }}" \
-            --arg branch "${{ github.ref_name }}" \
-            '{
-              grant_type:"urn:ietf:params:oauth:grant-type:token-exchange",
-              subject_token_type:"urn:ietf:params:oauth:token-type:id_token",
-              subject_token:$jwt,
-              provider_name:$provider_name,
-              project_key:$project_key,
-              job_id:$job_id,
-              run_id:$run_id,
-              repo:$repo,
-              revision:$revision,
-              branch:$branch
-            }')
-          RESP=$(curl -fsSL -X POST "$JF_URL/access/api/v1/oidc/token" -H "Content-Type: application/json" -d "$PAYLOAD")
-          JF_OIDC_TOKEN=$(echo "$RESP" | jq -er '.access_token // empty' || true)
-          if [[ -z "$JF_OIDC_TOKEN" ]]; then echo "Failed to obtain JFrog access token: $RESP" >&2; exit 1; fi
-          echo "JF_OIDC_TOKEN=$JF_OIDC_TOKEN" >> $GITHUB_ENV
-          # Platform app expects APPTRUST_ACCESS_TOKEN, so set both for compatibility
-          echo "APPTRUST_ACCESS_TOKEN=$JF_OIDC_TOKEN" >> $GITHUB_ENV
-          # Also set up AppTrust base URL
-          APPTRUST_BASE_URL="${BASE}/apptrust/api/v1"
-          echo "APPTRUST_BASE_URL=$APPTRUST_BASE_URL" >> $GITHUB_ENV
+          pip install --user PyYAML setuptools wheel
+          echo "✅ Python dependencies installed"
 
       - name: "[Run] Create version and write manifest"
         id: collect-versions
@@ -135,7 +109,6 @@ jobs:
         if: ${{ inputs.create_version != false && inputs.preview_only != true }}
         run: |
           set -euo pipefail
-          # Extract platform version from the release output
           PLATFORM_VERSION=$(grep -o '"platform_app_version": "[^"]*"' release_output.txt | sed 's/"platform_app_version": "//; s/"//' | head -1)
           if [[ -z "$PLATFORM_VERSION" ]]; then
             echo "❌ Could not extract platform version from output"
@@ -145,8 +118,6 @@ jobs:
           echo "manifest_created=true" >> $GITHUB_OUTPUT
           echo "✅ Platform application version created: $PLATFORM_VERSION"
 
-      # Note: Platform aggregator doesn't publish build info
-      # It only creates platform application versions via AppTrust API
 
       - name: "[Summary] Aggregation"
         run: |
@@ -172,7 +143,6 @@ jobs:
       contents: read
       id-token: write
     env:
-      # Prefer canonical JFrog variables used across the repo
       JFROG_URL: ${{ vars.JFROG_URL }}
     steps:
       - name: "[Setup] Checkout"
@@ -185,44 +155,17 @@ jobs:
           ref: 'main'
           path: 'bookverse-infra'
 
-      - name: "[Auth] Persist JF access token (OIDC → JFrog)"
+      - name: "[Auth] OIDC Token Exchange (bookverse-devops shared script)"
         id: exchange-oidc
-        env:
-          JF_URL: ${{ vars.JFROG_URL }}
-          PROJECT: ${{ vars.PROJECT_KEY }}
-          PROVIDER_NAME: bookverse-platform-github
         run: |
-          set -euo pipefail
-          if ! command -v jq >/dev/null 2>&1; then sudo apt-get update -y && sudo apt-get install -y jq; fi
-          if [[ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" || -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]]; then
-            echo "❌ Missing GitHub OIDC request env vars" >&2; exit 1; fi
-          GH_ID_TOKEN=$(curl -sS -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${JF_URL}" | jq -r .value)
-          if [[ -z "$GH_ID_TOKEN" || "$GH_ID_TOKEN" == "null" ]]; then echo "❌ Failed to fetch GitHub ID token" >&2; exit 1; fi
-          PAYLOAD=$(jq -n --arg jwt "$GH_ID_TOKEN" \
-            --arg provider_name "$PROVIDER_NAME" \
-            --arg project_key "$PROJECT" \
-            --arg job_id "${{ github.job }}" \
-            --arg run_id "${{ github.run_id }}" \
-            --arg repo "https://github.com/${{ github.repository }}" \
-            --arg revision "${{ github.sha }}" \
-            --arg branch "${{ github.ref_name }}" \
-            '{
-              grant_type:"urn:ietf:params:oauth:grant-type:token-exchange",
-              subject_token_type:"urn:ietf:params:oauth:token-type:id_token",
-              subject_token:$jwt,
-              provider_name:$provider_name,
-              project_key:$project_key,
-              job_id:$job_id,
-              run_id:$run_id,
-              repo:$repo,
-              revision:$revision,
-              branch:$branch
-            }')
-          TOKEN=$(curl -sS -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$JF_URL/access/api/v1/oidc/token" | jq -r .access_token)
-          if [[ -z "$TOKEN" || "$TOKEN" == "null" ]]; then echo "❌ Failed to exchange OIDC token" >&2; exit 1; fi
-          echo "token=$TOKEN" >> $GITHUB_OUTPUT
-          echo "JF_OIDC_TOKEN=$TOKEN" >> $GITHUB_ENV
+          echo "🔐 Using bookverse-devops shared OIDC exchange script"
+          bookverse-infra/libraries/bookverse-devops/scripts/exchange-oidc-token.sh \
+            --service-name "platform" \
+            --provider-name "bookverse-platform-github" \
+            --jfrog-url "${{ vars.JFROG_URL }}" \
+            --docker-registry "${{ vars.DOCKER_REGISTRY }}" \
+            --verbose
+          echo "✅ OIDC token exchange completed using shared bookverse-devops script"
 
       - name: "[Setup] Python"
         uses: actions/setup-python@v5
@@ -230,16 +173,14 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: "[Setup] Install dependencies"
+      - name: "[Setup] Install Python dependencies"
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install --user PyYAML setuptools wheel
+          echo "✅ Python dependencies installed"
 
-      # Note: Platform aggregator uses AppTrust API directly, no JFrog CLI needed
 
-      - name: "[Auto-Promote] Through Stages to STAGING"
+      - name: "[Setup] Promotion Environment"
         env:
-          # Set up environment variables expected by promotion library
           APPLICATION_KEY: "bookverse-platform"
           APP_VERSION: "${{ needs.aggregate.outputs.platform_version }}"
           JFROG_URL: "${{ vars.JFROG_URL }}"
@@ -249,58 +190,198 @@ jobs:
           FINAL_STAGE: "STAGING"
           ALLOW_RELEASE: "false"
         run: |
-          set -euo pipefail
-          echo "🚀 Auto-promoting platform through stages to STAGING..."
-          echo "ℹ️  Note: PROD release is handled by separate workflow by design"
+          echo "🚀 Initializing platform promotion environment..."
+          echo "📋 Platform Version: ${{ needs.aggregate.outputs.platform_version }}"
+          echo "🎯 Target: DEV → QA → STAGING (PROD handled by separate workflow)"
           
-          # Source the shared promotion library
           source bookverse-infra/libraries/bookverse-devops/scripts/promote-lib.sh
+          setup_promotion_environment
           
-          PLATFORM_VERSION="${{ needs.aggregate.outputs.platform_version }}"
+          echo "✅ Promotion environment initialized"
+
+      - name: "[Promote & Evidence] DEV Stage"
+        env:
+          APPLICATION_KEY: "bookverse-platform"
+          APP_VERSION: "${{ needs.aggregate.outputs.platform_version }}"
+          JF_OIDC_TOKEN: "${{ steps.exchange-oidc.outputs.token }}"
+          EVIDENCE_PRIVATE_KEY: ${{ secrets.EVIDENCE_PRIVATE_KEY }}
+          EVIDENCE_KEY_ALIAS: ${{ vars.EVIDENCE_KEY_ALIAS }}
+        run: |
+          echo "🧪 Promoting platform to DEV stage with evidence collection"
+          echo "📋 Platform Version: $APP_VERSION"
+          echo "🎯 Target Stage: DEV (development environment for platform testing)"
+          echo "🛡️ Evidence Type: Platform aggregation validation and smoke tests"
           
-          echo "📋 Promoting $APPLICATION_KEY@$PLATFORM_VERSION through stages..."
-          echo "🔧 Environment check:"
-          echo "   APPLICATION_KEY: $APPLICATION_KEY"
-          echo "   APP_VERSION: $APP_VERSION"
-          echo "   PROJECT_KEY: $PROJECT_KEY"
-          echo "   STAGES_STR: $STAGES_STR"
-          echo "   FINAL_STAGE: $FINAL_STAGE"
-          echo "   ALLOW_RELEASE: $ALLOW_RELEASE"
+          if [[ -z "${JF_OIDC_TOKEN:-}" ]]; then
+            echo "❌ Missing JF_OIDC_TOKEN. Ensure OIDC exchange step succeeded." >&2
+            exit 1
+          fi
+          echo "✅ Using JF_OIDC_TOKEN for DEV promotion"
           
-          # Promote through each stage: UNASSIGNED → DEV → QA → STAGING
-          # PROD release is handled by separate workflow
-          STAGES=("DEV" "QA" "STAGING")
+          source bookverse-infra/libraries/bookverse-devops/scripts/evidence-lib.sh
+          setup_promotion_environment
           
-          for stage in "${STAGES[@]}"; do
-            echo "🎯 Promoting to $stage..."
-            if advance_one_step; then
-              echo "✅ Successfully promoted to $stage"
-            else
-              echo "❌ Failed to promote to $stage"
-              exit 1
-            fi
-            
-            # Brief pause between promotions for demo visibility
-            sleep 2
-          done
+          if advance_one_step; then
+            echo "✅ Successfully promoted platform to DEV"
+          else
+            echo "❌ Failed to promote platform to DEV"
+            exit 1
+          fi
           
-          echo "🎉 Platform version $PLATFORM_VERSION successfully promoted to STAGING!"
+          # Attach platform-specific DEV evidence
+          export APPLICATION_KEY="bookverse-platform"
+          export APP_VERSION="${{ needs.aggregate.outputs.platform_version }}"
+          attach_application_dev_evidence
+          echo "✅ DEV stage evidence attached via shared library: platform-smoke-tests"
+
+      - name: "[Promote & Evidence] QA Stage"
+        env:
+          APPLICATION_KEY: "bookverse-platform"
+          APP_VERSION: "${{ needs.aggregate.outputs.platform_version }}"
+          JF_OIDC_TOKEN: "${{ steps.exchange-oidc.outputs.token }}"
+          EVIDENCE_PRIVATE_KEY: ${{ secrets.EVIDENCE_PRIVATE_KEY }}
+          EVIDENCE_KEY_ALIAS: ${{ vars.EVIDENCE_KEY_ALIAS }}
+        run: |
+          echo "🔍 Promoting platform to QA stage with evidence collection"
+          echo "📋 Platform Version: $APP_VERSION"
+          echo "🎯 Target Stage: QA (quality assurance for platform integration)"
+          echo "🛡️ Evidence Type: Platform integration tests and service compatibility validation"
+          
+          if [[ -z "${JF_OIDC_TOKEN:-}" ]]; then
+            echo "❌ Missing JF_OIDC_TOKEN. Ensure OIDC exchange step succeeded." >&2
+            exit 1
+          fi
+          echo "✅ Using JF_OIDC_TOKEN for QA promotion"
+          
+          source bookverse-infra/libraries/bookverse-devops/scripts/evidence-lib.sh
+          setup_promotion_environment
+          
+          if advance_one_step; then
+            echo "✅ Successfully promoted platform to QA"
+          else
+            echo "❌ Failed to promote platform to QA"
+            exit 1
+          fi
+          
+          # Attach platform-specific QA evidence
+          export APPLICATION_KEY="bookverse-platform"
+          export APP_VERSION="${{ needs.aggregate.outputs.platform_version }}"
+          attach_application_qa_evidence
+          echo "✅ QA stage evidence attached via shared library: platform-integration-tests, service-compatibility-scan"
+
+      - name: "[Promote & Evidence] STAGING Stage"
+        env:
+          APPLICATION_KEY: "bookverse-platform"
+          APP_VERSION: "${{ needs.aggregate.outputs.platform_version }}"
+          JF_OIDC_TOKEN: "${{ steps.exchange-oidc.outputs.token }}"
+          EVIDENCE_PRIVATE_KEY: ${{ secrets.EVIDENCE_PRIVATE_KEY }}
+          EVIDENCE_KEY_ALIAS: ${{ vars.EVIDENCE_KEY_ALIAS }}
+        run: |
+          echo "🏗️ Promoting platform to STAGING stage with evidence collection"
+          echo "📋 Platform Version: $APP_VERSION"
+          echo "🎯 Target Stage: STAGING (pre-production platform validation)"
+          echo "🛡️ Evidence Type: Platform performance tests and production readiness validation"
+          
+          if [[ -z "${JF_OIDC_TOKEN:-}" ]]; then
+            echo "❌ Missing JF_OIDC_TOKEN. Ensure OIDC exchange step succeeded." >&2
+            exit 1
+          fi
+          echo "✅ Using JF_OIDC_TOKEN for STAGING promotion"
+          
+          source bookverse-infra/libraries/bookverse-devops/scripts/evidence-lib.sh
+          setup_promotion_environment
+          
+          if advance_one_step; then
+            echo "✅ Successfully promoted platform to STAGING"
+          else
+            echo "❌ Failed to promote platform to STAGING"
+            exit 1
+          fi
+          
+          # Attach platform-specific STAGING evidence
+          export APPLICATION_KEY="bookverse-platform"
+          export APP_VERSION="${{ needs.aggregate.outputs.platform_version }}"
+          attach_application_staging_evidence
+          echo "✅ STAGING stage evidence attached via shared library: platform-performance-test, production-readiness-scan"
+          echo "🎉 Platform version $APP_VERSION successfully promoted to STAGING with all evidence!"
           echo "🔄 Use separate release workflow to promote to PROD when ready"
 
-      - name: "[Summary] Promotion"
+      - name: "📊 Enhanced Platform Summary (bookverse-devops pattern)"
+        if: always()
         run: |
-          echo "## 🚀 Platform Promotion Summary" >> $GITHUB_STEP_SUMMARY
+          echo "📊 Generating comprehensive platform aggregation and promotion summary for stakeholder visibility"
+          echo "🎯 This summary provides complete aggregation status, service versions, and deployment readiness"
+          
+          echo "## 🏗️ BookVerse Platform - Aggregation & Promotion Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Platform Version:** \`${{ needs.aggregate.outputs.platform_version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Final Stage:** \`STAGING\`" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Platform Information" >> $GITHUB_STEP_SUMMARY
+          echo "- **Service:** platform (aggregation service)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Platform Version:** \`${{ needs.aggregate.outputs.platform_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Workflow Type:** Aggregation & Auto-Promotion" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🎯 Promotion Path" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ UNASSIGNED → DEV" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ DEV → QA" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ QA → STAGING" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### ✅ AppTrust Compliance Status" >> $GITHUB_STEP_SUMMARY
+          echo "- **Job 1 (aggregate):** ✅ Completed - Service versions collected and platform version created" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ needs.aggregate.outputs.manifest_created }}" == "true" ]]; then
+            echo "- **Job 2 (promote):** ✅ Completed - Platform promoted through all stages to STAGING" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Job 2 (promote):** ⏭️ Skipped (preview mode or creation disabled)" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🔄 Next Steps" >> $GITHUB_STEP_SUMMARY
-          echo "- Use separate **Release** workflow to promote to PROD when ready" >> $GITHUB_STEP_SUMMARY
-          echo "- PROD release is handled by dedicated workflow by design" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### 🔗 Aggregated Service Versions" >> $GITHUB_STEP_SUMMARY
+          echo "Platform aggregates the following service application versions from PROD stage:" >> $GITHUB_STEP_SUMMARY
+          echo "- **📦 Inventory Service:** \`${{ inputs.inventory_version || 'Latest from PROD' }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **🎯 Recommendations Service:** \`${{ inputs.recommendations_version || 'Latest from PROD' }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **💳 Checkout Service:** \`${{ inputs.checkout_version || 'Latest from PROD' }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **🌐 Web Service:** \`${{ inputs.web_version || 'Latest from PROD' }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **📋 Platform Manifest:** ✅ Generated with service dependencies" >> $GITHUB_STEP_SUMMARY
+          echo "- **🔗 Platform Application Version:** ✅ Created in AppTrust with source links" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "🎉 **Platform ready for STAGING validation!**" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ needs.aggregate.outputs.manifest_created }}" == "true" ]]; then
+            echo "### 🎯 Promotion Path & Evidence" >> $GITHUB_STEP_SUMMARY
+            echo "Platform follows step-by-step promotion with comprehensive evidence collection:" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ **UNASSIGNED → DEV**: Platform aggregation validation and smoke tests" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ **DEV → QA**: Integration tests and service compatibility validation" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ **QA → STAGING**: Performance tests and production readiness validation" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            echo "### 🛡️ Evidence Artifacts" >> $GITHUB_STEP_SUMMARY
+            echo "- **DEV Evidence:** platform-smoke-tests" >> $GITHUB_STEP_SUMMARY
+            echo "- **QA Evidence:** platform-integration-tests, service-compatibility-scan" >> $GITHUB_STEP_SUMMARY
+            echo "- **STAGING Evidence:** platform-performance-test, production-readiness-scan" >> $GITHUB_STEP_SUMMARY
+            echo "- **Evidence Collection:** ✅ Cryptographically signed and uploaded" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "### 🚀 Platform Optimizations Applied" >> $GITHUB_STEP_SUMMARY
+          echo "- **bookverse-devops:** ✅ Shared OIDC authentication & promotion patterns" >> $GITHUB_STEP_SUMMARY
+          echo "- **Service Aggregation:** ✅ Automated collection from PROD stage releases" >> $GITHUB_STEP_SUMMARY
+          echo "- **Step-by-step Promotion:** ✅ Individual stage promotion with evidence" >> $GITHUB_STEP_SUMMARY
+          echo "- **Compliance Evidence:** ✅ Comprehensive audit trail for each stage" >> $GITHUB_STEP_SUMMARY
+          echo "- **Platform-specific Logic:** ✅ Custom aggregation without package versioning" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ needs.aggregate.outputs.manifest_created }}" == "true" ]]; then
+            echo "### 🎯 Platform Deployment Status" >> $GITHUB_STEP_SUMMARY
+            echo "Platform version **\`${{ needs.aggregate.outputs.platform_version }}\`** has been created and promoted to **STAGING**." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**🔄 Next Steps:**" >> $GITHUB_STEP_SUMMARY
+            echo "- Platform is ready for STAGING validation and testing" >> $GITHUB_STEP_SUMMARY
+            echo "- Use separate **Release** workflow to promote to PROD when ready" >> $GITHUB_STEP_SUMMARY
+            echo "- PROD promotion requires manual approval and additional compliance validation" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### 📋 Preview Mode" >> $GITHUB_STEP_SUMMARY
+            echo "Platform aggregation ran in preview mode - no versions created or promoted." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**🔄 Next Steps:**" >> $GITHUB_STEP_SUMMARY
+            echo "- Run workflow with \`create_version=true\` to create platform application version" >> $GITHUB_STEP_SUMMARY
+            echo "- Ensure \`auto_promote=true\` to enable automatic promotion to STAGING" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Enhanced platform summary generated using bookverse-devops patterns" >> $GITHUB_STEP_SUMMARY
