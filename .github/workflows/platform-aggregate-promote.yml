@@ -211,7 +211,12 @@ jobs:
         env:
           APPLICATION_KEY: "bookverse-platform"
           APP_VERSION: "${{ needs.aggregate.outputs.platform_version }}"
+          JFROG_URL: "${{ vars.JFROG_URL }}"
+          PROJECT_KEY: "${{ vars.PROJECT_KEY }}"
           JF_OIDC_TOKEN: "${{ steps.exchange-oidc.outputs.token }}"
+          STAGES_STR: "DEV QA STAGING"
+          FINAL_STAGE: "STAGING"
+          ALLOW_RELEASE: "false"
           EVIDENCE_PRIVATE_KEY: ${{ secrets.EVIDENCE_PRIVATE_KEY }}
           EVIDENCE_KEY_ALIAS: ${{ vars.EVIDENCE_KEY_ALIAS }}
         run: |
@@ -246,7 +251,12 @@ jobs:
         env:
           APPLICATION_KEY: "bookverse-platform"
           APP_VERSION: "${{ needs.aggregate.outputs.platform_version }}"
+          JFROG_URL: "${{ vars.JFROG_URL }}"
+          PROJECT_KEY: "${{ vars.PROJECT_KEY }}"
           JF_OIDC_TOKEN: "${{ steps.exchange-oidc.outputs.token }}"
+          STAGES_STR: "DEV QA STAGING"
+          FINAL_STAGE: "STAGING"
+          ALLOW_RELEASE: "false"
           EVIDENCE_PRIVATE_KEY: ${{ secrets.EVIDENCE_PRIVATE_KEY }}
           EVIDENCE_KEY_ALIAS: ${{ vars.EVIDENCE_KEY_ALIAS }}
         run: |
@@ -281,7 +291,12 @@ jobs:
         env:
           APPLICATION_KEY: "bookverse-platform"
           APP_VERSION: "${{ needs.aggregate.outputs.platform_version }}"
+          JFROG_URL: "${{ vars.JFROG_URL }}"
+          PROJECT_KEY: "${{ vars.PROJECT_KEY }}"
           JF_OIDC_TOKEN: "${{ steps.exchange-oidc.outputs.token }}"
+          STAGES_STR: "DEV QA STAGING"
+          FINAL_STAGE: "STAGING"
+          ALLOW_RELEASE: "false"
           EVIDENCE_PRIVATE_KEY: ${{ secrets.EVIDENCE_PRIVATE_KEY }}
           EVIDENCE_KEY_ALIAS: ${{ vars.EVIDENCE_KEY_ALIAS }}
         run: |
