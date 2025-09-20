@@ -43,7 +43,7 @@ def analyze_platform_modules():
     """Analyze platform module improvements."""
     app_dir = Path(__file__).parent.parent / 'app'
     
-    modules = ['main.py', 'auth.py', 'tagging_service.py']
+    modules = ['main.py', 'auth.py']
     shared_imports = 0
     total_lines = 0
     

@@ -108,14 +108,22 @@ class AppTrustClient:
             data = json.dumps(body).encode("utf-8")
             headers["Content-Type"] = "application/json"
         req = urllib.request.Request(url=url, data=data, method=method, headers=headers)
-        with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
-            raw = resp.read()
-            if not raw:
-                return {}
-            try:
-                return json.loads(raw.decode("utf-8"))
-            except Exception:
-                return {"raw": raw.decode("utf-8", errors="replace")}
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
+                raw = resp.read()
+                if not raw:
+                    return {}
+                try:
+                    return json.loads(raw.decode("utf-8"))
+                except json.JSONDecodeError as e:
+                    raise ValueError(f"Invalid JSON response from AppTrust API: {e}. Raw response: {raw.decode('utf-8', errors='replace')[:500]}")
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode('utf-8', errors='replace') if hasattr(e, 'read') else 'No error body'
+            raise ValueError(f"AppTrust API HTTP {e.code} error for {method} {url}: {error_body}")
+        except urllib.error.URLError as e:
+            raise ValueError(f"AppTrust API connection error for {method} {url}: {e}")
+        except Exception as e:
+            raise ValueError(f"AppTrust API request failed for {method} {url}: {e}")
 
     def list_application_versions(self, app_key: str, limit: int = 200) -> Dict[str, Any]:
         path = f"/applications/{urllib.parse.quote(app_key)}/versions"
@@ -146,7 +154,8 @@ def compute_next_semver_for_application(client: AppTrustClient, app_key: str) ->
         resp = client.list_application_versions(app_key, limit=1)
         versions = resp.get("versions", []) if isinstance(resp, dict) else []
         latest = str(versions[0].get("version", "")) if versions else ""
-    except Exception:
+    except Exception as e:
+        print(f"WARNING: Failed to get latest application version for {app_key}: {e}", flush=True)
         latest = ""
 
     parsed = SemVer.parse(latest) if latest else None
@@ -287,9 +296,16 @@ def build_manifest(applications: List[Dict[str, Any]], client: AppTrustClient, s
         if not app_key or not version:
             raise ValueError(f"Application entry missing required fields: {entry}")
 
-        content = client.get_version_content(app_key, str(version)) or {}
-        sources = content.get("sources", {}) if isinstance(content, dict) else {}
-        releasables = content.get("releasables", {}) if isinstance(content, dict) else {}
+        content = client.get_version_content(app_key, str(version))
+        if not content or not isinstance(content, dict):
+            raise ValueError(f"Failed to get version content for {app_key} version {version}. This indicates an API authentication or connectivity issue.")
+        
+        sources = content.get("sources", {})
+        releasables = content.get("releasables", {})
+        
+        # Validate that we got meaningful data
+        if not releasables:
+            raise ValueError(f"No releasables found for {app_key} version {version}. This version may not have been properly built or published.")
 
         apps_block.append(
             {

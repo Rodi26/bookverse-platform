@@ -36,7 +36,6 @@ class TestPlatformE2E(unittest.TestCase):
         
         try:
             from app import auth
-            from app import tagging_service
             from app import main
             print("✅ All platform modules imported successfully")
         except ImportError as e:
@@ -98,32 +97,6 @@ class TestPlatformE2E(unittest.TestCase):
                 
             except Exception as e:
                 self.fail(f"❌ Platform auth test failed: {e}")
-    
-    def test_04_tagging_service_app(self):
-        """Test tagging service FastAPI application."""
-        print("\n🧪 Testing Tagging Service Application...")
-        
-        with patch.dict(os.environ, self.test_env):
-            try:
-                from app.tagging_service import app, health
-                from fastapi.testclient import TestClient
-                
-                # Test app creation
-                self.assertIsNotNone(app)
-                print("✅ FastAPI app created successfully")
-                
-                # Test health endpoint
-                try:
-                    client = TestClient(app)
-                    response = client.get("/health")
-                    self.assertEqual(response.status_code, 200)
-                    self.assertEqual(response.json(), {"status": "ok"})
-                    print("✅ Health endpoint works")
-                except Exception as e:
-                    print(f"⚠️  Health endpoint test skipped (dependency issue): {e}")
-                
-            except Exception as e:
-                self.fail(f"❌ Tagging service test failed: {e}")
     
     def test_05_platform_aggregator_config(self):
         """Test platform aggregator configuration loading."""
@@ -216,39 +189,6 @@ class TestPlatformE2E(unittest.TestCase):
                 
             except Exception as e:
                 self.fail(f"❌ AppTrust client test failed: {e}")
-    
-    def test_08_tagging_logic(self):
-        """Test platform tagging logic components."""
-        print("\n🧪 Testing Platform Tagging Logic...")
-        
-        with patch.dict(os.environ, self.test_env):
-            try:
-                from app.tagging_service import (
-                    sort_versions_by_semver_desc, 
-                    AppTrustClient,
-                    LATEST_TAG,
-                    QUARANTINE_TAG
-                )
-                
-                # Test version sorting in tagging context
-                versions = ['1.2.0', '1.1.0', '1.3.0', '1.1.5']
-                sorted_versions = sort_versions_by_semver_desc(versions)
-                self.assertEqual(sorted_versions[0], '1.3.0')
-                print("✅ Tagging service version sorting works")
-                
-                # Test constants
-                self.assertEqual(LATEST_TAG, 'latest')
-                self.assertEqual(QUARANTINE_TAG, 'quarantine')
-                print("✅ Tagging constants defined correctly")
-                
-                # Test AppTrust client in tagging context
-                client = AppTrustClient()
-                self.assertIsNotNone(client)
-                print("✅ Tagging service AppTrust client works")
-                
-            except Exception as e:
-                # This might fail due to missing env vars, which is expected in test
-                print(f"⚠️  Tagging logic test partially completed: {e}")
     
     def test_09_workflow_yaml_syntax(self):
         """Test that all workflow files have valid YAML syntax."""

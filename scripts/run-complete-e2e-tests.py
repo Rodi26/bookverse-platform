@@ -52,7 +52,7 @@ def validate_platform_functionality():
     # Test 1: Module imports
     try:
         sys.path.insert(0, str(Path(__file__).parent.parent))
-        from app import main, auth, tagging_service
+        from app import main, auth
         from bookverse_core.auth import AuthUser
         from bookverse_core.utils import get_logger
         validations.append("✅ All modules import successfully")
@@ -79,7 +79,7 @@ def validate_platform_functionality():
     
     # Test 3: Python compilation
     try:
-        app_files = ['app/main.py', 'app/auth.py', 'app/tagging_service.py']
+        app_files = ['app/main.py', 'app/auth.py']
         for app_file in app_files:
             result = subprocess.run([
                 sys.executable, '-m', 'py_compile', str(platform_root / app_file)

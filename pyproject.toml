@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "bookverse-platform"
 version = "0.1.0"
-description = "Platform aggregation and tagging services for BookVerse"
+description = "Platform aggregation service for BookVerse"
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
@@ -50,8 +50,6 @@ dev = [
 bookverse-platform-aggregator = "app.main:main"
 bookverse-platform-rollback = "scripts.apptrust_rollback:main"
 bookverse-platform-semver = "scripts.semver_versioning:main"
-# Web service
-bookverse-platform-tagging = "app.tagging_service:main"
 
 [project.urls]
 Homepage = "https://github.com/bookverse/bookverse-platform"

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Entrypoint script for BookVerse Platform Service
-# Supports both aggregator CLI and tagging service modes
+# Supports aggregator CLI mode
 
 set -e
 
@@ -25,16 +25,9 @@ case "$MODE" in
             --source-stage PROD \
             "${@:2}"
         ;;
-    "tagging-service")
-        echo "Starting Platform Tagging Service..."
-        exec uvicorn app.tagging_service:app \
-            --host 0.0.0.0 \
-            --port 8000 \
-            "${@:2}"
-        ;;
     *)
         echo "Unknown mode: $MODE"
-        echo "Usage: $0 [aggregator|tagging-service] [additional-args...]"
+        echo "Usage: $0 [aggregator] [additional-args...]"
         exit 1
         ;;
 esac

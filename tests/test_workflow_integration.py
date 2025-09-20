@@ -245,13 +245,11 @@ class TestWorkflowIntegration(unittest.TestCase):
             # Test main modules
             from app import main
             from app import auth  
-            from app import tagging_service
             
             print("✅ All platform modules import successfully")
             
             # Test that modules use shared libraries
             import app.auth
-            import app.tagging_service
             
             # Check for bookverse_core imports in source
             auth_file = self.platform_root / 'app' / 'auth.py'
@@ -260,13 +258,6 @@ class TestWorkflowIntegration(unittest.TestCase):
             
             self.assertIn('from bookverse_core', auth_content,
                          "Auth module should use bookverse_core")
-            
-            tagging_file = self.platform_root / 'app' / 'tagging_service.py'
-            with open(tagging_file, 'r') as f:
-                tagging_content = f.read()
-            
-            self.assertIn('from bookverse_core', tagging_content,
-                         "Tagging service should use bookverse_core")
             
             print("✅ Platform modules properly use shared libraries")
             

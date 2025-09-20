@@ -76,7 +76,6 @@ def main():
     # Check that core platform logic files exist
     core_files = [
         'app/main.py',  # Platform aggregator
-        'app/tagging_service.py',  # Platform tagging service
         'config/services.yaml',  # Service configuration
     ]
     

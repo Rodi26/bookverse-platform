@@ -12,12 +12,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY config ./config
 
-# Expose port for tagging service
-EXPOSE 8000
-
-# Support both aggregator CLI and tagging service
-# Use environment variable SERVICE_MODE to determine which to run
-# Default to aggregator CLI for backward compatibility
+# Support aggregator CLI
+# Default to aggregator CLI
 COPY entrypoint.sh ./
 RUN chmod +x entrypoint.sh
 
