@@ -131,7 +131,7 @@ class AppTrustClient:
 
     def get_version_content(self, app_key: str, version: str) -> Dict[str, Any]:
         path = f"/applications/{urllib.parse.quote(app_key)}/versions/{urllib.parse.quote(version)}/content"
-        return self._request("GET", path)
+        return self._request("GET", path, query={"include": "releasables"})
 
     def create_platform_version(self, platform_app_key: str, version: str, sources_versions: List[Dict[str, str]]) -> Dict[str, Any]:
         path = f"/applications/{urllib.parse.quote(platform_app_key)}/versions"
@@ -323,22 +323,16 @@ def build_manifest(applications: List[Dict[str, Any]], client: AppTrustClient, s
         print(f"📋 DEBUG: Current stage: {content.get('current_stage', 'N/A')}", flush=True)
         
         sources = content.get("sources", {})
-        releasables = content.get("releasables", {})
-        releasables_count = content.get("releasables_count", 0)
+        releasables = content.get("releasables", [])
         
         print(f"📦 DEBUG: Sources count: {len(sources) if sources else 0}", flush=True)
-        print(f"📦 DEBUG: Releasables dict count: {len(releasables) if releasables else 0}", flush=True)
-        print(f"📦 DEBUG: Releasables_count field: {releasables_count}", flush=True)
+        print(f"📦 DEBUG: Releasables count: {len(releasables) if releasables else 0}", flush=True)
         if releasables:
-            print(f"📦 DEBUG: Releasables keys: {list(releasables.keys())}", flush=True)
+            print(f"📦 DEBUG: Releasables: {[r.get('name', 'unnamed') for r in releasables]}", flush=True)
         
-        # Validate that we got meaningful data - check both releasables dict and count
-        if not releasables and releasables_count == 0:
+        # Validate that we got meaningful data
+        if not releasables:
             raise ValueError(f"No releasables found for {app_key} version {version}. This version may not have been properly built or published.")
-        elif not releasables and releasables_count > 0:
-            print(f"⚠️  WARNING: Releasables dict is empty but releasables_count={releasables_count}. This may be an API issue, proceeding anyway.", flush=True)
-            # Create a placeholder releasables structure to avoid breaking the manifest
-            releasables = {"placeholder": {"count": releasables_count}}
 
         apps_block.append(
             {
