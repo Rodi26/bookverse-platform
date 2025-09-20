@@ -16,6 +16,15 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+# Import OIDC authentication utilities
+try:
+    # Try to import from the shared library
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', 'bookverse-infra', 'libraries', 'bookverse-devops', 'scripts'))
+    from oidc_auth import get_jfrog_token, get_apptrust_base_url
+    OIDC_AVAILABLE = True
+except ImportError:
+    OIDC_AVAILABLE = False
+
 SEMVER_RE = re.compile(
     r"^\s*v?(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)"
     r"(?:-(?P<prerelease>(?:0|[1-9]\d*|[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|[a-zA-Z-][0-9a-zA-Z-]*))*))?"
@@ -210,23 +219,59 @@ def _env(name: str, default: Optional[str] = None) -> Optional[str]:
         return default
     return v.strip()
 
+def get_auth_token() -> Optional[str]:
+    """Get authentication token using OIDC-first approach with fallback."""
+    if OIDC_AVAILABLE:
+        # Try OIDC authentication first
+        token = get_jfrog_token()
+        if token:
+            return token
+    
+    # Fall back to environment variables
+    token = _env("JF_OIDC_TOKEN")
+    if token:
+        return token
+    
+    # Legacy fallback
+    return None
+
+def get_base_url() -> Optional[str]:
+    """Get AppTrust base URL using OIDC-aware approach with fallback."""
+    if OIDC_AVAILABLE:
+        # Try OIDC-aware URL detection
+        url = get_apptrust_base_url()
+        if url:
+            return url
+    
+    # Fall back to environment variable
+    return _env("APPTRUST_BASE_URL")
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="AppTrust PROD rollback utility")
     parser.add_argument("--app", required=True, help="Application key")
     parser.add_argument("--version", required=True, help="Target version to rollback (SemVer)")
-    parser.add_argument("--base-url", default=_env("APPTRUST_BASE_URL"), help="Base API URL, e.g. https://<host>/apptrust/api/v1 (env: APPTRUST_BASE_URL)")
-    parser.add_argument("--token", default=_env("APPTRUST_ACCESS_TOKEN"), help="Access token (env: APPTRUST_ACCESS_TOKEN)")
+    parser.add_argument("--base-url", default=None, help="Base API URL, e.g. https://<host>/apptrust/api/v1 (env: APPTRUST_BASE_URL, JF_OIDC_TOKEN via OIDC)")
+    parser.add_argument("--token", default=None, help="Access token (env: JF_OIDC_TOKEN or OIDC auto-detection)")
     parser.add_argument("--dry-run", action="store_true", help="Log intended changes without mutating")
     args = parser.parse_args()
 
-    if not args.base_url:
-        print("Missing --base-url or APPTRUST_BASE_URL", file=sys.stderr)
-        return 2
-    if not args.token:
-        print("Missing --token or APPTRUST_ACCESS_TOKEN", file=sys.stderr)
+    # Get base URL with OIDC-aware fallback
+    base_url = args.base_url or get_base_url()
+    if not base_url:
+        print("Missing --base-url or APPTRUST_BASE_URL environment variable", file=sys.stderr)
+        print("For OIDC authentication, ensure JFROG_URL is set", file=sys.stderr)
         return 2
 
-    client = AppTrustClient(args.base_url, args.token)
+    # Get token with OIDC-first approach
+    token = args.token or get_auth_token()
+    if not token:
+        print("Missing authentication token", file=sys.stderr)
+        print("Tried: JF_OIDC_TOKEN, OIDC auto-detection", file=sys.stderr)
+        if not OIDC_AVAILABLE:
+            print("Note: OIDC authentication library not available", file=sys.stderr)
+        return 2
+
+    client = AppTrustClient(base_url, token)
 
     try:
         start = time.time()

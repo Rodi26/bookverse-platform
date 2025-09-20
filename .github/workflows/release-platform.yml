@@ -221,46 +221,36 @@ jobs:
             print(resp.read().decode('utf-8'))
           PY
 
-      - name: "[Tags] Enforce PROD 'latest' invariants"
+      - name: "[Tags] Self-Healing Tag Management"
         env:
           JFROG_URL: ${{ vars.JFROG_URL }}
           JF_OIDC_TOKEN: ${{ env.JF_OIDC_TOKEN }}
+          PROJECT_KEY: ${{ vars.PROJECT_KEY }}
+          APPLICATION_KEY: bookverse-platform
         run: |
           set -euo pipefail
-          if ! command -v jq >/dev/null 2>&1; then sudo apt-get update -y && sudo apt-get install -y jq; fi
-          APP_KEY="bookverse-platform"
-          BASE="${JFROG_URL%/}/apptrust/api/v1"
-          TOKEN="$JF_OIDC_TOKEN"
-          RESP=$(mktemp)
-          code=$(curl -sS -L -o "$RESP" -w "%{http_code}" \
-            "$BASE/applications/$APP_KEY/versions?limit=1000&order_by=created&order_asc=false" \
-            -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" || echo 000)
-          if [[ "$code" -lt 200 || "$code" -ge 300 ]]; then
-            echo "❌ Failed to list versions (HTTP $code)" >&2; cat "$RESP" || true; exit 1
-          fi
-          DESIRED=$(jq -r '[.versions[] | select((.release_status|tostring|ascii_upcase)=="RELEASED" or (.release_status|tostring|ascii_upcase)=="TRUSTED_RELEASE") | .version] | unique | map(select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))) | sort_by(split(".")|map(tonumber)) | last // empty' "$RESP")
-          if [[ -z "$DESIRED" ]]; then
-            mapfile -t PREV_LATEST < <(jq -r '.versions[] | select(.tag=="latest") | .version' "$RESP")
-            for pv in "${PREV_LATEST[@]:-}"; do
-              [ -z "$pv" ] && continue
-              restore=$(jq -r --arg v "$pv" '.versions[] | select(.version==$v) | (.properties.original_tag_before_latest[0] // .version // "")' "$RESP")
-              printf '{"tag":"%s","delete_properties":["original_tag_before_latest"]}' "$restore" > body.json
-              curl -sS -L -X PATCH "$BASE/applications/$APP_KEY/versions/$pv" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d @body.json | cat
-            done
-            rm -f "$RESP" body.json
-            exit 0
-          fi
-          CURR_TAG=$(jq -r --arg v "$DESIRED" '.versions[] | select(.version==$v) | (.tag // "")' "$RESP")
-          jq -n --arg ct "$CURR_TAG" '{tag:"latest", properties:{original_tag_before_latest:[$ct]}}' > body.json
-          curl -sS -L -X PATCH "$BASE/applications/$APP_KEY/versions/$DESIRED" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d @body.json | cat
-          mapfile -t OTHERS < <(jq -r --arg v "$DESIRED" '.versions[] | select(.tag=="latest" and .version!=$v) | .version' "$RESP")
-          for ov in "${OTHERS[@]:-}"; do
-            [ -z "$ov" ] && continue
-            restore=$(jq -r --arg v "$ov" '.versions[] | select(.version==$v) | (.properties.original_tag_before_latest[0] // .version // "")' "$RESP")
-            printf '{"tag":"%s","delete_properties":["original_tag_before_latest"]}' "$restore" > body.json
-            curl -sS -L -X PATCH "$BASE/applications/$APP_KEY/versions/$ov" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d @body.json | cat
-          done
-          rm -f "$RESP" body.json || true
+          echo "🏥 Running self-healing tag management for Platform PROD release"
+          echo "✅ PROD release successful, running comprehensive tag validation and healing"
+          
+          # Load the self-healing tag management library
+          source bookverse-infra/libraries/bookverse-devops/scripts/tag-management-lib.sh
+          
+          # Run comprehensive tag validation and healing
+          # This will:
+          # 1. Find all versions and their current states
+          # 2. Identify the highest SemVer version in PROD (latest candidate)
+          # 3. Validate all tags are correct based on version states
+          # 4. Fix any inconsistencies (add/remove tags as needed)
+          # 5. Handle quarantined versions, non-SemVer versions, etc.
+          validate_and_heal_tags
+          
+          echo ""
+          echo "🎯 Tag management completed for Platform version ${{ steps.resolve.outputs.version }}"
+          echo "📋 All versions now have correct tags based on their states:"
+          echo "   - 'latest': Highest SemVer version in PROD"
+          echo "   - 'quarantine': Versions that were rolled back"
+          echo "   - 'valid': Other valid SemVer versions"
+          echo "   - Non-SemVer versions: No special tags (ignored for 'latest')"
 
       - name: "[Helm] Pin version"
         if: ${{ false }}

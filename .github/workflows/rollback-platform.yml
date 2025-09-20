@@ -71,9 +71,9 @@ jobs:
               branch:$branch
             }')
           RESP=$(curl -fsSL -X POST "$JF_URL/access/api/v1/oidc/token" -H "Content-Type: application/json" -d "$PAYLOAD")
-          APPTRUST_ACCESS_TOKEN=$(echo "$RESP" | jq -er '.access_token // empty' || true)
-          if [[ -z "$APPTRUST_ACCESS_TOKEN" ]]; then echo "Failed to obtain JFrog access token: $RESP" >&2; exit 1; fi
-          echo "APPTRUST_ACCESS_TOKEN=$APPTRUST_ACCESS_TOKEN" >> $GITHUB_ENV
+          JF_OIDC_TOKEN=$(echo "$RESP" | jq -er '.access_token // empty' || true)
+          if [[ -z "$JF_OIDC_TOKEN" ]]; then echo "Failed to obtain JFrog access token: $RESP" >&2; exit 1; fi
+          echo "JF_OIDC_TOKEN=$JF_OIDC_TOKEN" >> $GITHUB_ENV
 
       - name: "[Setup] JFrog CLI"
         uses: EyalDelarea/setup-jfrog-cli@swampUpAppTrust
@@ -104,7 +104,7 @@ jobs:
             RESP_FILE=$(mktemp)
             HTTP_STATUS=$(curl -sS -L -o "$RESP_FILE" -w "%{http_code}" \
               "${{ vars.JFROG_URL }}$APPTRUST_BASE_URL/applications/$APP_KEY/versions?limit=20&order_by=created&order_asc=false" \
-              -H "Authorization: Bearer $APPTRUST_ACCESS_TOKEN" \
+              -H "Authorization: Bearer $JF_OIDC_TOKEN" \
               -H "Accept: application/json")
             if [[ "$HTTP_STATUS" -ge 200 && "$HTTP_STATUS" -lt 300 ]]; then
               TARGET_VERSION=$(jq -r '.versions[] | select((.release_status|tostring|ascii_upcase)=="RELEASED" or (.release_status|tostring|ascii_upcase)=="TRUSTED_RELEASE") | .version' "$RESP_FILE" | head -n1)
@@ -125,7 +125,7 @@ jobs:
 
           CONTENT_BEFORE=$(mktemp)
           CODE_B=$(curl -sS -L -o "$CONTENT_BEFORE" -w "%{http_code}" \
-            -H "Authorization: Bearer $APPTRUST_ACCESS_TOKEN" -H "Accept: application/json" \
+            -H "Authorization: Bearer $JF_OIDC_TOKEN" -H "Accept: application/json" \
             "${{ vars.JFROG_URL }}$APPTRUST_BASE_URL/applications/$APP_KEY/versions/$TARGET_VERSION/content" || echo 000)
           CURRENT_STAGE_BEFORE=""
           if [[ "$CODE_B" -ge 200 && "$CODE_B" -lt 300 ]]; then
@@ -139,7 +139,7 @@ jobs:
           MSG=""
           echo "🔁 Executing rollback via scripts/apptrust_rollback.py"
           export APPTRUST_BASE_URL="${{ vars.JFROG_URL }}$APPTRUST_BASE_URL"
-          export APPTRUST_ACCESS_TOKEN="$APPTRUST_ACCESS_TOKEN"
+          export JF_OIDC_TOKEN="$JF_OIDC_TOKEN"
           if python3 scripts/apptrust_rollback.py \
             --app "$APP_KEY" \
             --version "$TARGET_VERSION"; then
@@ -151,7 +151,7 @@ jobs:
 
           CONTENT_TARGET=$(mktemp)
           CODE_T=$(curl -sS -L -o "$CONTENT_TARGET" -w "%{http_code}" \
-            -H "Authorization: Bearer $APPTRUST_ACCESS_TOKEN" -H "Accept: application/json" \
+            -H "Authorization: Bearer $JF_OIDC_TOKEN" -H "Accept: application/json" \
             "$APPTRUST_BASE_URL/applications/$APP_KEY/versions/$TARGET_VERSION/content" || echo 000)
           CURR_STAGE_TARGET=""
           if [[ "$CODE_T" -ge 200 && "$CODE_T" -lt 300 ]]; then
@@ -170,7 +170,7 @@ jobs:
           RESP_FILE=$(mktemp)
           HTTP_STATUS=$(curl -sS -L -o "$RESP_FILE" -w "%{http_code}" \
             "$BASE/applications/$APP_KEY/versions?limit=1000&order_by=created&order_asc=false" \
-            -H "Authorization: Bearer $APPTRUST_ACCESS_TOKEN" \
+            -H "Authorization: Bearer $JF_OIDC_TOKEN" \
             -H "Accept: application/json")
           DESIRED=""
           if [[ "$HTTP_STATUS" -ge 200 && "$HTTP_STATUS" -lt 300 ]]; then
@@ -180,7 +180,7 @@ jobs:
             CURR_TAG=$(jq -r --arg v "$DESIRED" '.versions[] | select(.version==$v) | (.tag // "")' "$RESP_FILE")
             jq -n --arg ct "$CURR_TAG" '{tag:"latest", properties:{original_tag_before_latest:[$ct]}}' > body.json
             curl -sS -L -X PATCH "$BASE/applications/$APP_KEY/versions/$DESIRED" \
-              -H "Authorization: Bearer $APPTRUST_ACCESS_TOKEN" \
+              -H "Authorization: Bearer $JF_OIDC_TOKEN" \
               -H "Content-Type: application/json" -d @body.json | cat
           fi
           mapfile -t OTHERS < <(jq -r --arg v "$DESIRED" '.versions[] | select(.tag=="latest" and .version!=$v) | .version' "$RESP_FILE")
@@ -189,7 +189,7 @@ jobs:
             restore=$(jq -r --arg v "$ov" '.versions[] | select(.version==$v) | (.properties.original_tag_before_latest[0] // .version // "")' "$RESP_FILE")
             printf '{"tag":"%s","delete_properties":["original_tag_before_latest"]}' "$restore" > body.json
             curl -sS -L -X PATCH "$BASE/applications/$APP_KEY/versions/$ov" \
-              -H "Authorization: Bearer $APPTRUST_ACCESS_TOKEN" \
+              -H "Authorization: Bearer $JF_OIDC_TOKEN" \
               -H "Content-Type: application/json" -d @body.json | cat
           done
           rm -f "$RESP_FILE" body.json || true
@@ -198,7 +198,7 @@ jobs:
           LC_FILE=$(mktemp)
           PLATFORM_URL="${{ vars.JFROG_URL }}"
           CODE_LC=$(curl -sS -L -o "$LC_FILE" -w "%{http_code}" \
-            -H "Authorization: Bearer $APPTRUST_ACCESS_TOKEN" -H "Accept: application/json" \
+            -H "Authorization: Bearer $JF_OIDC_TOKEN" -H "Accept: application/json" \
             "$PLATFORM_URL/access/api/v2/lifecycle/?project_key=$PROJECT_KEY_ENV" || echo 000)
           NORM_FILE=$(mktemp)
           if [[ "$CODE_LC" -ge 200 && "$CODE_LC" -lt 300 ]]; then

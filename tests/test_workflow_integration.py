@@ -123,8 +123,10 @@ class TestWorkflowIntegration(unittest.TestCase):
         expected_vars = [
             'JFROG_URL',
             'PROJECT_KEY',
-            'APPTRUST_BASE_URL',
-            'APPTRUST_ACCESS_TOKEN'
+            # OIDC-based authentication
+            'JF_OIDC_TOKEN',
+            # Base URL configuration
+            'APPTRUST_BASE_URL'
         ]
         
         workflow_files = [f for f in self.workflows_dir.glob('*.yml') 

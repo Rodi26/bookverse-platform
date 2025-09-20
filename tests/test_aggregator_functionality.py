@@ -21,8 +21,8 @@ class TestPlatformAggregator(unittest.TestCase):
     def setUp(self):
         """Set up test environment."""
         self.test_env = {
-            'APPTRUST_BASE_URL': 'https://test.jfrog.io/apptrust/api/v1',
-            'APPTRUST_ACCESS_TOKEN': 'test-token-123'
+            'JFROG_URL': 'https://test.jfrog.io',
+            'JF_OIDC_TOKEN': 'test-oidc-token-123'
         }
         self.mock_services_config = [
             {

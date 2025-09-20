@@ -424,12 +424,25 @@ def main() -> int:
             return 2
         overrides[svc] = ver
 
-    # Require OIDC authentication via environment variables
+    # Get authentication using OIDC-first approach with fallback
     base_url = os.environ.get("APPTRUST_BASE_URL", "").strip()
-    token = os.environ.get("APPTRUST_ACCESS_TOKEN", "").strip()
+    if not base_url:
+        # Try to construct from JFROG_URL
+        jfrog_url = os.environ.get("JFROG_URL", "").strip()
+        if jfrog_url:
+            base_url = f"{jfrog_url.rstrip('/')}/apptrust/api/v1"
     
-    if not base_url or not token:
-        print("ERROR: Both APPTRUST_BASE_URL and APPTRUST_ACCESS_TOKEN environment variables are required", flush=True)
+    # Use OIDC token
+    token = os.environ.get("JF_OIDC_TOKEN", "").strip()
+    
+    if not base_url:
+        print("ERROR: APPTRUST_BASE_URL environment variable is required", flush=True)
+        print("       Alternatively, set JFROG_URL and it will be auto-constructed", flush=True)
+        return 2
+    
+    if not token:
+        print("ERROR: Authentication token is required", flush=True)
+        print("       Set JF_OIDC_TOKEN environment variable", flush=True)
         return 2
     
     try:

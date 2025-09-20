@@ -26,8 +26,8 @@ class TestPlatformE2E(unittest.TestCase):
             'OIDC_AUDIENCE': 'bookverse:api:test',
             'AUTH_ENABLED': 'false',  # Disable auth for testing
             'DEVELOPMENT_MODE': 'true',
-            'APPTRUST_BASE_URL': 'https://test.jfrog.io/apptrust/api/v1',
-            'APPTRUST_ACCESS_TOKEN': 'test-token-123'
+            'JFROG_URL': 'https://test.jfrog.io',
+            'JF_OIDC_TOKEN': 'test-oidc-token-123'
         }
     
     def test_01_platform_imports(self):

@@ -34,14 +34,10 @@ spec:
           value: "true"
         - name: DEVELOPMENT_MODE
           value: "false"
-        # AppTrust Configuration
-        - name: APPTRUST_BASE_URL
+        # AppTrust Configuration (OIDC-based)
+        - name: JFROG_URL
           value: "https://apptrust.jfrog.io"
-        - name: APPTRUST_ACCESS_TOKEN
-          valueFrom:
-            secretKeyRef:
-              name: apptrust-credentials
-              key: access-token
+        # JF_OIDC_TOKEN will be provided by the deployment system via OIDC authentication
         # Platform Configuration
         - name: PLATFORM_APP_KEY
           value: "bookverse-platform"
@@ -58,16 +54,3 @@ spec:
       volumes:
       - name: manifests
         emptyDir: {}
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: apptrust-credentials
-  namespace: bookverse-prod
-  labels:
-    component: platform
-type: Opaque
-data:
-  # Base64 encoded APPTRUST_ACCESS_TOKEN
-  # Replace with actual token: echo -n "your-token" | base64
-  access-token: cGxhY2Vob2xkZXItdG9rZW4=

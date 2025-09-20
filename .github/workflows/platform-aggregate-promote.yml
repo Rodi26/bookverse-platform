@@ -95,8 +95,8 @@ jobs:
       - name: "[Run] Create version and write manifest"
         id: collect-versions
         env:
-          APPTRUST_BASE_URL: "${{ vars.JFROG_URL }}/apptrust/api/v1"
-          APPTRUST_ACCESS_TOKEN: "${{ steps.exchange-oidc.outputs.token }}"
+          JFROG_URL: "${{ vars.JFROG_URL }}"
+          JF_OIDC_TOKEN: "${{ steps.exchange-oidc.outputs.token }}"
         run: |
           set -euo pipefail
           ARGS="--config config/services.yaml --output-dir manifests --source-stage PROD"
