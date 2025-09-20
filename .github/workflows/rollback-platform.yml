@@ -161,38 +161,37 @@ jobs:
           echo "📍 Stage AFTER:  ${CURR_STAGE_TARGET:-unknown}"
           echo "CURR_STAGE_TARGET=${CURR_STAGE_TARGET:-}" >> $GITHUB_ENV
 
-      - name: "[Tags] Enforce PROD 'latest' invariants"
+      - name: "[Tags] Self-Healing Tag Management"
         run: |
           set -euo pipefail
-          if ! command -v jq >/dev/null 2>&1; then sudo apt-get update -y && sudo apt-get install -y jq; fi
-          APP_KEY="$APPLICATION_KEY"
-          BASE="${{ vars.JFROG_URL }}/apptrust/api/v1"
-          RESP_FILE=$(mktemp)
-          HTTP_STATUS=$(curl -sS -L -o "$RESP_FILE" -w "%{http_code}" \
-            "$BASE/applications/$APP_KEY/versions?limit=1000&order_by=created&order_asc=false" \
-            -H "Authorization: Bearer $JF_OIDC_TOKEN" \
-            -H "Accept: application/json")
-          DESIRED=""
-          if [[ "$HTTP_STATUS" -ge 200 && "$HTTP_STATUS" -lt 300 ]]; then
-            DESIRED=$(jq -r '[.versions[] | select((.release_status|tostring|ascii_upcase)=="RELEASED" or (.release_status|tostring|ascii_upcase)=="TRUSTED_RELEASE") | .version] | unique | map(select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))) | sort_by(split(".")|map(tonumber)) | last // empty' "$RESP_FILE")
-          fi
-          if [[ -n "$DESIRED" ]]; then
-            CURR_TAG=$(jq -r --arg v "$DESIRED" '.versions[] | select(.version==$v) | (.tag // "")' "$RESP_FILE")
-            jq -n --arg ct "$CURR_TAG" '{tag:"latest", properties:{original_tag_before_latest:[$ct]}}' > body.json
-            curl -sS -L -X PATCH "$BASE/applications/$APP_KEY/versions/$DESIRED" \
-              -H "Authorization: Bearer $JF_OIDC_TOKEN" \
-              -H "Content-Type: application/json" -d @body.json | cat
-          fi
-          mapfile -t OTHERS < <(jq -r --arg v "$DESIRED" '.versions[] | select(.tag=="latest" and .version!=$v) | .version' "$RESP_FILE")
-          for ov in "${OTHERS[@]:-}"; do
-            [ -z "$ov" ] && continue
-            restore=$(jq -r --arg v "$ov" '.versions[] | select(.version==$v) | (.properties.original_tag_before_latest[0] // .version // "")' "$RESP_FILE")
-            printf '{"tag":"%s","delete_properties":["original_tag_before_latest"]}' "$restore" > body.json
-            curl -sS -L -X PATCH "$BASE/applications/$APP_KEY/versions/$ov" \
-              -H "Authorization: Bearer $JF_OIDC_TOKEN" \
-              -H "Content-Type: application/json" -d @body.json | cat
-          done
-          rm -f "$RESP_FILE" body.json || true
+          echo "🏥 Running self-healing tag management after Platform rollback operation"
+          echo "✅ Rollback completed, running comprehensive tag validation and healing"
+          
+          # Set up environment for tag management library
+          export JFROG_URL='${{ vars.JFROG_URL }}'
+          export PROJECT_KEY='${{ vars.PROJECT_KEY }}'
+          export APPLICATION_KEY="$APPLICATION_KEY"
+          # JF_OIDC_TOKEN is already available
+          
+          # Load the self-healing tag management library
+          source bookverse-infra/libraries/bookverse-devops/scripts/tag-management-lib.sh
+          
+          # Run comprehensive tag validation and healing
+          # This will:
+          # 1. Find all versions and their current states
+          # 2. Identify the highest SemVer version in PROD (latest candidate)
+          # 3. Validate all tags are correct based on version states
+          # 4. Fix any inconsistencies (add/remove tags as needed)
+          # 5. Handle quarantined versions, non-SemVer versions, etc.
+          validate_and_heal_tags
+          
+          echo ""
+          echo "🎯 Tag management completed after Platform rollback operation"
+          echo "📋 All versions now have correct tags based on their states:"
+          echo "   - 'latest': Highest SemVer version in PROD"
+          echo "   - 'quarantine': Versions that were rolled back"
+          echo "   - 'valid': Other valid SemVer versions"
+          echo "   - Non-SemVer versions: No special tags (ignored for 'latest')"
 
           PROJECT_KEY_ENV="${{ vars.PROJECT_KEY }}"
           LC_FILE=$(mktemp)
