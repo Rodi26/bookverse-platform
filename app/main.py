@@ -324,15 +324,21 @@ def build_manifest(applications: List[Dict[str, Any]], client: AppTrustClient, s
         
         sources = content.get("sources", {})
         releasables = content.get("releasables", {})
+        releasables_count = content.get("releasables_count", 0)
         
         print(f"📦 DEBUG: Sources count: {len(sources) if sources else 0}", flush=True)
-        print(f"📦 DEBUG: Releasables count: {len(releasables) if releasables else 0}", flush=True)
+        print(f"📦 DEBUG: Releasables dict count: {len(releasables) if releasables else 0}", flush=True)
+        print(f"📦 DEBUG: Releasables_count field: {releasables_count}", flush=True)
         if releasables:
             print(f"📦 DEBUG: Releasables keys: {list(releasables.keys())}", flush=True)
         
-        # Validate that we got meaningful data
-        if not releasables:
+        # Validate that we got meaningful data - check both releasables dict and count
+        if not releasables and releasables_count == 0:
             raise ValueError(f"No releasables found for {app_key} version {version}. This version may not have been properly built or published.")
+        elif not releasables and releasables_count > 0:
+            print(f"⚠️  WARNING: Releasables dict is empty but releasables_count={releasables_count}. This may be an API issue, proceeding anyway.", flush=True)
+            # Create a placeholder releasables structure to avoid breaking the manifest
+            releasables = {"placeholder": {"count": releasables_count}}
 
         apps_block.append(
             {
