@@ -197,15 +197,6 @@ def pick_latest_prod_version(client: AppTrustClient, app_key: str) -> Optional[s
     resp = client.list_application_versions(app_key)
     versions_raw = resp.get("versions", []) if isinstance(resp, dict) else []
 
-    print(f"🔍 DEBUG: Found {len(versions_raw)} total versions for {app_key}", flush=True)
-    
-    # Show first few versions for debugging
-    for i, v in enumerate(versions_raw[:5]):
-        ver = v.get("version", "")
-        rs = v.get("release_status", "")
-        tag = v.get("tag", "")
-        stage = v.get("current_stage", "")
-        print(f"  {i+1}. {ver} | {rs} | {stage} | tag:{tag}", flush=True)
 
     normalized: List[Dict[str, Any]] = []
     for v in versions_raw:
@@ -230,7 +221,6 @@ def pick_latest_prod_version(client: AppTrustClient, app_key: str) -> Optional[s
     ]
     prod_candidates: List[str] = [n["version"] for n in prod_candidates_full]
 
-    print(f"🎯 DEBUG: Found {len(prod_candidates)} PROD candidates: {prod_candidates}", flush=True)
 
     # Do not probe content: if none are qualifying, return None to signal no aggregatable version
     if not prod_candidates:
@@ -243,16 +233,12 @@ def pick_latest_prod_version(client: AppTrustClient, app_key: str) -> Optional[s
     try:
         latest_tagged = next((n for n in prod_candidates_full if str(n.get("tag", "")).strip().lower() == "latest"), None)
         if latest_tagged:
-            print(f"🏷️  DEBUG: Found 'latest' tagged version: {latest_tagged['version']}", flush=True)
             return latest_tagged["version"]
     except Exception:
         pass
 
     ordered = sort_versions_by_semver_desc(prod_candidates)
-    print(f"📈 DEBUG: Sorted versions: {ordered}", flush=True)
-    selected = ordered[0] if ordered else None
-    print(f"✅ DEBUG: Selected version: {selected}", flush=True)
-    return selected
+    return ordered[0] if ordered else None
 
 
 def resolve_promoted_versions(
@@ -312,23 +298,12 @@ def build_manifest(applications: List[Dict[str, Any]], client: AppTrustClient, s
         if not app_key or not version:
             raise ValueError(f"Application entry missing required fields: {entry}")
 
-        print(f"🔍 DEBUG: Processing {app_key} version {version}", flush=True)
-        
         content = client.get_version_content(app_key, str(version))
         if not content or not isinstance(content, dict):
             raise ValueError(f"Failed to get version content for {app_key} version {version}. This indicates an API authentication or connectivity issue.")
         
-        print(f"📋 DEBUG: Version content keys: {list(content.keys())}", flush=True)
-        print(f"📋 DEBUG: Release status: {content.get('release_status', 'N/A')}", flush=True)
-        print(f"📋 DEBUG: Current stage: {content.get('current_stage', 'N/A')}", flush=True)
-        
         sources = content.get("sources", {})
         releasables = content.get("releasables", [])
-        
-        print(f"📦 DEBUG: Sources count: {len(sources) if sources else 0}", flush=True)
-        print(f"📦 DEBUG: Releasables count: {len(releasables) if releasables else 0}", flush=True)
-        if releasables:
-            print(f"📦 DEBUG: Releasables: {[r.get('name', 'unnamed') for r in releasables]}", flush=True)
         
         # Validate that we got meaningful data
         if not releasables:
