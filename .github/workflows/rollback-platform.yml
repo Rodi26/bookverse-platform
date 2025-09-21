@@ -257,7 +257,7 @@ jobs:
             echo "## 🔄 Promotion Rollback"
             echo ""
             echo "**Repository:** \`${{ github.repository }}\`"
-            echo "**Application:** \`$APP_KEY\`"
+            echo "**Application:** \`$APPLICATION_KEY\`"
             echo "**Target Version:** \`${TARGET_VERSION:-unknown}\`"
             echo "**Status:** ${STATUS}"
             echo ""
