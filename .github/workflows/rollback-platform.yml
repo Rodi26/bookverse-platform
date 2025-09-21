@@ -100,16 +100,16 @@ jobs:
           APPTRUST_BASE_URL="/apptrust/api/v1"
 
           SERVICE_NAME=$(echo "${GITHUB_REPOSITORY#*/}" | sed 's/bookverse-//')
-          APP_KEY="bookverse-$SERVICE_NAME"
-          echo "📦 Application: $APP_KEY"
-          echo "APPLICATION_KEY=$APP_KEY" >> $GITHUB_ENV
+          APPLICATION_KEY="bookverse-$SERVICE_NAME"
+          echo "📦 Application: $APPLICATION_KEY"
+          echo "APPLICATION_KEY=$APPLICATION_KEY" >> $GITHUB_ENV
 
           TARGET_VERSION="${{ inputs.version || '' }}"
           if [ -z "$TARGET_VERSION" ]; then
-            echo "🔎 Resolving latest promoted version for $APP_KEY"
+            echo "🔎 Resolving latest promoted version for $APPLICATION_KEY"
             RESP_FILE=$(mktemp)
             HTTP_STATUS=$(curl -sS -L -o "$RESP_FILE" -w "%{http_code}" \
-              "${{ vars.JFROG_URL }}$APPTRUST_BASE_URL/applications/$APP_KEY/versions?limit=20&order_by=created&order_asc=false" \
+              "${{ vars.JFROG_URL }}$APPTRUST_BASE_URL/applications/$APPLICATION_KEY/versions?limit=20&order_by=created&order_asc=false" \
               -H "Authorization: Bearer $JF_OIDC_TOKEN" \
               -H "Accept: application/json")
             if [[ "$HTTP_STATUS" -ge 200 && "$HTTP_STATUS" -lt 300 ]]; then
@@ -122,7 +122,7 @@ jobs:
             fi
             rm -f "$RESP_FILE"
             if [ -z "${TARGET_VERSION:-}" ] || [ "$TARGET_VERSION" = "null" ]; then
-              echo "❌ Could not resolve latest promoted version for $APP_KEY" >&2
+              echo "❌ Could not resolve latest promoted version for $APPLICATION_KEY" >&2
               exit 1
             fi
             echo "🎯 Defaulting to latest promoted version: $TARGET_VERSION"
@@ -132,7 +132,7 @@ jobs:
           CONTENT_BEFORE=$(mktemp)
           CODE_B=$(curl -sS -L -o "$CONTENT_BEFORE" -w "%{http_code}" \
             -H "Authorization: Bearer $JF_OIDC_TOKEN" -H "Accept: application/json" \
-            "${{ vars.JFROG_URL }}$APPTRUST_BASE_URL/applications/$APP_KEY/versions/$TARGET_VERSION/content" || echo 000)
+            "${{ vars.JFROG_URL }}$APPTRUST_BASE_URL/applications/$APPLICATION_KEY/versions/$TARGET_VERSION/content" || echo 000)
           CURRENT_STAGE_BEFORE=""
           if [[ "$CODE_B" -ge 200 && "$CODE_B" -lt 300 ]]; then
             CURRENT_STAGE_BEFORE=$(jq -r '.current_stage // empty' "$CONTENT_BEFORE" 2>/dev/null || echo "")
@@ -143,22 +143,22 @@ jobs:
 
           STATUS="SUCCESS"
           MSG=""
-          echo "🔁 Executing rollback via scripts/apptrust_rollback.py"
+          echo "🔁 Executing rollback via .github/scripts/apptrust_rollback.py"
           export APPTRUST_BASE_URL="${{ vars.JFROG_URL }}$APPTRUST_BASE_URL"
           export JF_OIDC_TOKEN="$JF_OIDC_TOKEN"
-          if python3 scripts/apptrust_rollback.py \
-            --app "$APP_KEY" \
+          if python3 .github/scripts/apptrust_rollback.py \
+            --app "$APPLICATION_KEY" \
             --version "$TARGET_VERSION"; then
-            MSG="Rollback executed for $APP_KEY@$TARGET_VERSION"
+            MSG="Rollback executed for $APPLICATION_KEY@$TARGET_VERSION"
           else
             STATUS="FAILED"
-            MSG="Rollback failed for $APP_KEY@$TARGET_VERSION"
+            MSG="Rollback failed for $APPLICATION_KEY@$TARGET_VERSION"
           fi
 
           CONTENT_TARGET=$(mktemp)
           CODE_T=$(curl -sS -L -o "$CONTENT_TARGET" -w "%{http_code}" \
             -H "Authorization: Bearer $JF_OIDC_TOKEN" -H "Accept: application/json" \
-            "$APPTRUST_BASE_URL/applications/$APP_KEY/versions/$TARGET_VERSION/content" || echo 000)
+            "$APPTRUST_BASE_URL/applications/$APPLICATION_KEY/versions/$TARGET_VERSION/content" || echo 000)
           CURR_STAGE_TARGET=""
           if [[ "$CODE_T" -ge 200 && "$CODE_T" -lt 300 ]]; then
             CURR_STAGE_TARGET=$(jq -r '.current_stage // empty' "$CONTENT_TARGET" 2>/dev/null || echo "")
