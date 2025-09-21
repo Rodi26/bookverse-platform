@@ -133,12 +133,16 @@ class AppTrustClient:
         path = f"/applications/{urllib.parse.quote(app_key)}/versions/{urllib.parse.quote(version)}/content"
         return self._request("GET", path, query={"include": "releasables"})
 
-    def create_platform_version(self, platform_app_key: str, version: str, sources_versions: List[Dict[str, str]]) -> Dict[str, Any]:
+    def create_platform_version(self, platform_app_key: str, version: str, sources_versions: List[Dict[str, str]], tag: str = "release") -> Dict[str, Any]:
         path = f"/applications/{urllib.parse.quote(platform_app_key)}/versions"
         body = {
             "version": version,
+            "tag": tag,
             "sources": {
-                "versions": sources_versions,
+                "applications": [
+                    {"application_key": s["application_key"], "version": s["version"]}
+                    for s in sources_versions
+                ]
             },
         }
         return self._request("POST", path, body=body)
@@ -487,12 +491,20 @@ def main() -> int:
     if do_write:
         target = write_manifest(output_dir, manifest)
         print(f"Wrote manifest: {target}")
+        
+        # Determine application version tag - matching other services pattern
+        tag_options = ["release", "hotfix", "feature", "bugfix", "enhancement", "security", "performance", "refactor"]
+        github_run_number = int(os.environ.get("GITHUB_RUN_NUMBER", "1"))
+        tag_index = github_run_number % len(tag_options)
+        app_tag = tag_options[tag_index]
+        print(f"🏷️ Platform Application Version Tag: {app_tag}")
+        
         # Create platform application version in AppTrust
         sources_versions = [
             {"application_key": s["apptrust_application"], "version": s["resolved_version"]}
             for s in services
         ]
-        resp = client.create_platform_version(platform_app_key, platform_app_version, sources_versions)
+        resp = client.create_platform_version(platform_app_key, platform_app_version, sources_versions, app_tag)
         print(json.dumps({"platform_version_created": resp}, indent=2))
     else:
         print("Preview: resolved live versions; no files written and no AppTrust changes. Omit --preview to create the platform version and write the manifest.")
