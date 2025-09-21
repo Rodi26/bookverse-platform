@@ -223,7 +223,7 @@ jobs:
             STAGES+=("$s_disp")
           done < <(jq -r --arg n "$LIFECYCLE_NAME" '([ .[] | select(.name==$n) | .stages ] | .[0] // []) | map(if type=="object" then .name else . end) | .[]' "$NORM_FILE" 2>/dev/null)
           rm -f "$NORM_FILE"
-          if [[ ${
+          if [[ ${#STAGES[@]} -eq 0 ]]; then
             STAGES=(DEV QA STAGING PROD)
           fi
           echo "🧭 Lifecycle stages: ${STAGES[*]}"
@@ -248,7 +248,7 @@ jobs:
 
           STATUS="SUCCESS"
           MSG="Rollback executed for ${APPLICATION_KEY}@${TARGET_VERSION}"
-          if [ ${
+          if [ ${#VALIDATION_ERRORS[@]} -gt 0 ]; then
             STATUS="FAILED"
             MSG="Validation failed: ${VALIDATION_ERRORS[*]}"
           fi
