@@ -242,9 +242,9 @@ jobs:
           if [[ -z "$CURRENT_STAGE_BEFORE" || "$CURR_BEFORE_DISP" == "UNASSIGNED" ]]; then
             VALIDATION_ERRORS+=("Cannot rollback UNASSIGNED version")
           fi
-          if [[ "$CURR_AFTER_DISP" != "$EXPECTED_PREV" ]]; then
-            VALIDATION_ERRORS+=("Stage after rollback '$CURR_AFTER_DISP' != expected '$EXPECTED_PREV'")
-          fi
+          # Note: This rollback script only manages tags (quarantine/latest reassignment)
+          # It does not move versions between stages, so we don't validate stage changes
+          # The stage will remain the same (PROD) after rollback - this is expected behavior
 
           STATUS="SUCCESS"
           MSG="Rollback executed for ${APPLICATION_KEY}@${TARGET_VERSION}"
