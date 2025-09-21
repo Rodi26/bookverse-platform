@@ -79,13 +79,8 @@ jobs:
       - name: "[Auth] OIDC Token Exchange (bookverse-devops shared script)"
         id: exchange-oidc
         run: |
-          echo "🔐 Using bookverse-devops shared OIDC exchange script"
-          # enhanced-oidc-auth.sh replaced with new standard pattern \
-            --service-name "platform" \
-            --provider-name "bookverse-platform-github" \
-            --jfrog-url "${{ vars.JFROG_URL }}" \
-            --verbose
-          echo "✅ OIDC token exchange completed using shared bookverse-devops script"
+          echo "🔐 OIDC authentication handled by JFrog CLI setup step above"
+          echo "✅ Using new standard OIDC pattern with EyalDelarea/setup-jfrog-cli@swampUpAppTrust"
 
       - name: "[Setup] Install Python dependencies"
         run: |
@@ -160,13 +155,8 @@ jobs:
       - name: "[Auth] OIDC Token Exchange (bookverse-devops shared script)"
         id: exchange-oidc
         run: |
-          echo "🔐 Using bookverse-devops shared OIDC exchange script"
-          # enhanced-oidc-auth.sh replaced with new standard pattern \
-            --service-name "platform" \
-            --provider-name "bookverse-platform-github" \
-            --jfrog-url "${{ vars.JFROG_URL }}" \
-            --verbose
-          echo "✅ OIDC token exchange completed using shared bookverse-devops script"
+          echo "🔐 OIDC authentication handled by JFrog CLI setup step above"
+          echo "✅ Using new standard OIDC pattern with EyalDelarea/setup-jfrog-cli@swampUpAppTrust"
 
       - name: "[Setup] Python"
         uses: actions/setup-python@v5
