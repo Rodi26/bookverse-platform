@@ -307,8 +307,8 @@ def main():
             f.write(f"APP_VERSION={app_version}\n")
             # Don't overwrite BUILD_NUMBER - keep the original GitHub run format for JFrog build tracking
             # f.write(f"BUILD_NUMBER={build_number}\n")  # REMOVED: This was causing collisions
-            # Use computed build_number for IMAGE_TAG to ensure uniqueness
-            f.write(f"IMAGE_TAG={build_number}\n")
+            # Don't set IMAGE_TAG here - let CI workflows choose the appropriate package tag
+            # Each service should set IMAGE_TAG to the specific package version they need
             for k, v in pkg_tags.items():
                 key = re.sub(r"[^A-Za-z0-9_]", "_", k.upper())
                 f.write(f"DOCKER_TAG_{key}={v}\n")
