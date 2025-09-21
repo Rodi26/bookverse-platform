@@ -76,11 +76,45 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: "[Auth] OIDC Token Exchange (bookverse-devops shared script)"
+      - name: "[Setup] JFrog CLI"
+        uses: EyalDelarea/setup-jfrog-cli@swampUpAppTrust
+        id: jfrog-cli-auth
+        with:
+          oidc-provider-name: bookverse-platform-github
+          oidc-audience: ${{ vars.JFROG_URL }}
+        env:
+          JF_URL: ${{ vars.JFROG_URL }}
+          JF_PROJECT: ${{ vars.PROJECT_KEY }}
+
+      - name: "[Setup] Extract OIDC Token from JFrog CLI"
         id: exchange-oidc
         run: |
-          echo "🔐 OIDC authentication handled by JFrog CLI setup step above"
-          echo "✅ Using new standard OIDC pattern with EyalDelarea/setup-jfrog-cli@swampUpAppTrust"
+          echo "🔍 Extracting OIDC token from JFrog CLI step output..."
+          
+          # Debug: Check all available outputs from JFrog CLI step
+          echo "🔍 Debugging JFrog CLI step outputs..."
+          echo "Available outputs:"
+          echo "  oidc-user: '${{ steps.jfrog-cli-auth.outputs.oidc-user }}'"
+          echo "  oidc-token: '${{ steps.jfrog-cli-auth.outputs.oidc-token }}'"
+          echo "  access-token: '${{ steps.jfrog-cli-auth.outputs.access-token }}'"
+          echo "  token: '${{ steps.jfrog-cli-auth.outputs.token }}'"
+          
+          # Use the oidc-token output as specified
+          OIDC_TOKEN="${{ steps.jfrog-cli-auth.outputs.oidc-token }}"
+          if [[ -n "$OIDC_TOKEN" && "$OIDC_TOKEN" != "null" ]]; then
+            echo "✅ Successfully retrieved OIDC token from JFrog CLI step output (oidc-token)"
+            echo "📋 Token length: ${#OIDC_TOKEN} characters"
+          else
+            echo "❌ OIDC token not available from JFrog CLI step output (oidc-token)"
+            echo "🔍 Available outputs from jfrog-cli-auth step:"
+            echo "  oidc-user: '${{ steps.jfrog-cli-auth.outputs.oidc-user }}'"
+            echo "  oidc-token: '${{ steps.jfrog-cli-auth.outputs.oidc-token }}'"
+            echo "  access-token: '${{ steps.jfrog-cli-auth.outputs.access-token }}'"
+            echo "  token: '${{ steps.jfrog-cli-auth.outputs.token }}'"
+            exit 1
+          fi
+          
+          echo "token=$OIDC_TOKEN" >> $GITHUB_OUTPUT
 
       - name: "[Setup] Install Python dependencies"
         run: |
@@ -152,12 +186,6 @@ jobs:
           ref: 'main'
           path: 'bookverse-infra'
 
-      - name: "[Auth] OIDC Token Exchange (bookverse-devops shared script)"
-        id: exchange-oidc
-        run: |
-          echo "🔐 OIDC authentication handled by JFrog CLI setup step above"
-          echo "✅ Using new standard OIDC pattern with EyalDelarea/setup-jfrog-cli@swampUpAppTrust"
-
       - name: "[Setup] Python"
         uses: actions/setup-python@v5
         with:
@@ -171,11 +199,35 @@ jobs:
 
       - name: "[Setup] JFrog CLI"
         uses: EyalDelarea/setup-jfrog-cli@swampUpAppTrust
+        id: jfrog-cli-auth-promote
+        with:
+          oidc-provider-name: bookverse-platform-github
+          oidc-audience: ${{ vars.JFROG_URL }}
+        env:
+          JF_URL: ${{ vars.JFROG_URL }}
+          JF_PROJECT: ${{ vars.PROJECT_KEY }}
 
-      - name: "[Setup] Configure JFrog CLI"
+      - name: "[Setup] Extract OIDC Token from JFrog CLI"
+        id: exchange-oidc
         run: |
-          jf c add --interactive=false --url "${{ vars.JFROG_URL }}" --access-token ""
-          echo "✅ JFrog CLI configured"
+          echo "🔍 Extracting OIDC token from JFrog CLI step output for promotion..."
+          
+          # Use the oidc-token output as specified
+          OIDC_TOKEN="${{ steps.jfrog-cli-auth-promote.outputs.oidc-token }}"
+          if [[ -n "$OIDC_TOKEN" && "$OIDC_TOKEN" != "null" ]]; then
+            echo "✅ Successfully retrieved OIDC token from JFrog CLI step output (oidc-token)"
+            echo "📋 Token length: ${#OIDC_TOKEN} characters"
+          else
+            echo "❌ OIDC token not available from JFrog CLI step output (oidc-token)"
+            echo "🔍 Available outputs from jfrog-cli-auth-promote step:"
+            echo "  oidc-user: '${{ steps.jfrog-cli-auth-promote.outputs.oidc-user }}'"
+            echo "  oidc-token: '${{ steps.jfrog-cli-auth-promote.outputs.oidc-token }}'"
+            echo "  access-token: '${{ steps.jfrog-cli-auth-promote.outputs.access-token }}'"
+            echo "  token: '${{ steps.jfrog-cli-auth-promote.outputs.token }}'"
+            exit 1
+          fi
+          
+          echo "token=$OIDC_TOKEN" >> $GITHUB_OUTPUT
 
       - name: "[Setup] Promotion Environment"
         env:
