@@ -80,7 +80,7 @@ jobs:
         id: exchange-oidc
         run: |
           echo "🔐 Using bookverse-devops shared OIDC exchange script"
-          bookverse-infra/libraries/bookverse-devops/scripts/exchange-oidc-token.sh \
+          bookverse-infra/libraries/bookverse-devops/scripts/enhanced-oidc-auth.sh \
             --service-name "platform" \
             --provider-name "bookverse-platform-github" \
             --jfrog-url "${{ vars.JFROG_URL }}" \
@@ -161,7 +161,7 @@ jobs:
         id: exchange-oidc
         run: |
           echo "🔐 Using bookverse-devops shared OIDC exchange script"
-          bookverse-infra/libraries/bookverse-devops/scripts/exchange-oidc-token.sh \
+          bookverse-infra/libraries/bookverse-devops/scripts/enhanced-oidc-auth.sh \
             --service-name "platform" \
             --provider-name "bookverse-platform-github" \
             --jfrog-url "${{ vars.JFROG_URL }}" \
