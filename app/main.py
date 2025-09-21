@@ -139,7 +139,7 @@ class AppTrustClient:
             "version": version,
             "tag": tag,
             "sources": {
-                "applications": sources_versions
+                "versions": sources_versions
             },
         }
         return self._request("POST", path, body=body)
