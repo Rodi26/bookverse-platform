@@ -92,7 +92,7 @@ def sort_versions_by_semver_desc(version_strings: List[str]) -> List[str]:
 
 
 class AppTrustClient:
-    def __init__(self, base_url: str, token: str, timeout_seconds: int = 30) -> None:
+    def __init__(self, base_url: str, token: str, timeout_seconds: int = 600) -> None:  # 10 minutes for platform operations
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.timeout_seconds = timeout_seconds
@@ -193,7 +193,7 @@ def pick_latest_prod_version(client: AppTrustClient, app_key: str) -> Optional[s
     Strategy:
     - Read the list of versions (created desc ordering).
     - Keep only entries that already include a qualifying release_status.
-    - Return the highest SemVer among the qualified candidates; prefer 'latest' tag if present.
+    - Return the highest SemVer among the qualified candidates (ignores tag to avoid tag management race conditions).
     """
     resp = client.list_application_versions(app_key)
     versions_raw = resp.get("versions", []) if isinstance(resp, dict) else []
@@ -230,14 +230,9 @@ def pick_latest_prod_version(client: AppTrustClient, app_key: str) -> Optional[s
     if not prod_candidates:
         return None
 
-    # Prefer an entry explicitly tagged as 'latest' if present among PROD
-    try:
-        latest_tagged = next((n for n in prod_candidates_full if str(n.get("tag", "")).strip().lower() == "latest"), None)
-        if latest_tagged:
-            return latest_tagged["version"]
-    except Exception:
-        pass
-
+    # Always use the highest SemVer version among PROD candidates
+    # This ensures we don't get stuck on an older version that still has the 'latest' tag
+    # during tag management transitions
     ordered = sort_versions_by_semver_desc(prod_candidates)
     return ordered[0] if ordered else None
 

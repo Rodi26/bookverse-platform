@@ -167,6 +167,7 @@ jobs:
     needs: aggregate
     if: ${{ needs.aggregate.outputs.manifest_created == 'true' && inputs.auto_promote != false && inputs.preview_only != true }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30  # Allow sufficient time for platform promotion operations
     defaults:
       run:
         shell: bash
@@ -261,6 +262,7 @@ jobs:
           ALLOW_RELEASE: "false"
           EVIDENCE_PRIVATE_KEY: ${{ secrets.EVIDENCE_PRIVATE_KEY }}
           EVIDENCE_KEY_ALIAS: ${{ vars.EVIDENCE_KEY_ALIAS }}
+          APPTRUST_TIMEOUT_SECONDS: "600"  # 10 minutes for platform aggregation operations
         run: |
           echo "🧪 Promoting platform to DEV stage with evidence collection"
           echo "📋 Platform Version: $APP_VERSION"
@@ -301,6 +303,7 @@ jobs:
           ALLOW_RELEASE: "false"
           EVIDENCE_PRIVATE_KEY: ${{ secrets.EVIDENCE_PRIVATE_KEY }}
           EVIDENCE_KEY_ALIAS: ${{ vars.EVIDENCE_KEY_ALIAS }}
+          APPTRUST_TIMEOUT_SECONDS: "600"  # 10 minutes for platform aggregation operations
         run: |
           echo "🔍 Promoting platform to QA stage with evidence collection"
           echo "📋 Platform Version: $APP_VERSION"
@@ -341,6 +344,7 @@ jobs:
           ALLOW_RELEASE: "false"
           EVIDENCE_PRIVATE_KEY: ${{ secrets.EVIDENCE_PRIVATE_KEY }}
           EVIDENCE_KEY_ALIAS: ${{ vars.EVIDENCE_KEY_ALIAS }}
+          APPTRUST_TIMEOUT_SECONDS: "600"  # 10 minutes for platform aggregation operations
         run: |
           echo "🏗️ Promoting platform to STAGING stage with evidence collection"
           echo "📋 Platform Version: $APP_VERSION"

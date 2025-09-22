@@ -125,6 +125,29 @@ class TestPlatformAggregator(unittest.TestCase):
             self.assertEqual(resolved[0]['resolved_version'], '1.8.3')
             print("✅ Service version resolution works")
     
+    def test_latest_tag_race_condition_fix(self):
+        """Test that pick_latest_prod_version ignores 'latest' tag and uses highest SemVer."""
+        print("\n🧪 Testing Latest Tag Race Condition Fix...")
+        
+        from app.main import pick_latest_prod_version, AppTrustClient
+        
+        # Mock AppTrust client with scenario where older version has 'latest' tag
+        with patch.object(AppTrustClient, 'list_application_versions') as mock_list:
+            mock_list.return_value = {
+                'versions': [
+                    {'version': '2.0.0', 'release_status': 'RELEASED', 'current_stage': 'PROD', 'tag': ''},
+                    {'version': '1.9.0', 'release_status': 'RELEASED', 'current_stage': 'PROD', 'tag': 'latest'},
+                    {'version': '1.8.0', 'release_status': 'RELEASED', 'current_stage': 'PROD', 'tag': 'valid'}
+                ]
+            }
+            
+            client = AppTrustClient('https://test.com', 'token')
+            
+            # Should pick 2.0.0 (highest SemVer) even though 1.9.0 has 'latest' tag
+            latest = pick_latest_prod_version(client, 'bookverse-inventory')
+            self.assertEqual(latest, '2.0.0')
+            print("✅ Correctly ignores 'latest' tag and picks highest SemVer version")
+    
     def test_manifest_building(self):
         """Test platform manifest building."""
         print("\n🧪 Testing Manifest Building...")
