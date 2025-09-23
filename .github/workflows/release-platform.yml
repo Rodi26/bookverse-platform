@@ -50,6 +50,12 @@
 #
 name: Release
 
+# 🔄 Concurrency Control: Ensures only one release operation runs at a time
+# Prevents conflicting production deployments and ensures safe release coordination
+concurrency:
+  group: release-platform-${{ vars.PROJECT_KEY }}-${{ github.repository }}
+  cancel-in-progress: false  # Preserve running releases for safety
+
 # ⚡ Workflow Triggers: Manual execution for controlled production release operations
 # Provides precise control over production deployment timing and release management
 on:
