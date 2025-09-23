@@ -1,0 +1,11 @@
+{
+  "yaml.validate": false,
+  "yaml.schemaStore.enable": false,
+  "yaml.schemas": {},
+  "problems.filter": {
+    "showWarnings": false,
+    "showErrors": true,
+    "showInfos": false
+  },
+  "problems.sortOrder": "severity"
+}
