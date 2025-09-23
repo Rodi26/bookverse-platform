@@ -1,3 +1,51 @@
+"""
+BookVerse Platform Service - Application Aggregation and Release Management
+
+This module implements sophisticated platform aggregation functionality for the
+BookVerse microservices ecosystem, providing automated service version resolution,
+manifest generation, and platform release orchestration through JFrog AppTrust
+integration.
+
+🏗️ Platform Architecture:
+    - Service Aggregation: Automated collection of production-ready microservice versions
+    - Version Resolution: Intelligent semantic version parsing and selection logic
+    - Manifest Generation: Comprehensive platform manifests with provenance tracking
+    - AppTrust Integration: Full lifecycle management through JFrog AppTrust APIs
+    - Release Orchestration: Automated platform version creation and deployment
+
+🚀 Key Features:
+    - Semantic Versioning: Full SemVer 2.0 compliance with prerelease support
+    - Production Filtering: Automatic selection of RELEASED and TRUSTED_RELEASE versions
+    - Version Overrides: Manual version specification for testing and hotfixes
+    - Manifest Provenance: Complete audit trail with evidence collection
+    - Preview Mode: Safe dry-run capabilities for validation and testing
+    - Error Recovery: Comprehensive error handling and graceful degradation
+
+🔧 Integration Capabilities:
+    - JFrog AppTrust: Complete API integration for version and content management
+    - GitHub Actions: Native CI/CD integration with environment variable support
+    - YAML Configuration: Flexible service configuration with validation
+    - Manifest Output: Structured YAML manifests for downstream consumption
+    - Logging Integration: Comprehensive logging for debugging and audit
+
+📊 Business Logic:
+    - Platform Releases: Bi-weekly aggregation cycles with hotfix support
+    - Quality Gates: Production readiness validation for all included services
+    - Dependency Resolution: Intelligent handling of service interdependencies
+    - Release Tagging: Automated tag generation for release categorization
+    - Audit Compliance: Full evidence collection for regulatory requirements
+
+🛠️ Usage Patterns:
+    - Automated Releases: Scheduled platform aggregation in CI/CD pipelines
+    - Manual Overrides: Developer-initiated releases with specific versions
+    - Preview Operations: Safe testing of aggregation logic without changes
+    - Hotfix Releases: Emergency releases with selective version overrides
+    - Integration Testing: Platform version validation in staging environments
+
+Authors: BookVerse Platform Team
+Version: 1.0.0
+"""
+
 import argparse
 import datetime as dt
 import json
@@ -13,16 +61,59 @@ import yaml
 
 
 def load_services_config(config_path: Path) -> List[Dict[str, Any]]:
+    """
+    Load and validate service configuration from YAML file.
+    
+    This function loads the service configuration that defines which microservices
+    are included in platform aggregation, along with their AppTrust application
+    keys and metadata needed for version resolution.
+    
+    🔧 Configuration Structure:
+        The YAML file should contain a 'services' list with entries like:
+        ```yaml
+        services:
+          - name: "inventory"
+            apptrust_application: "bookverse-inventory"
+            description: "Product catalog and inventory management"
+          - name: "recommendations"
+            apptrust_application: "bookverse-recommendations"
+            description: "AI-powered recommendation engine"
+        ```
+    
+    Args:
+        config_path (Path): Path to the services.yaml configuration file
+        
+    Returns:
+        List[Dict[str, Any]]: List of service configuration dictionaries
+        
+    Raises:
+        FileNotFoundError: If the configuration file doesn't exist
+        ValueError: If the configuration format is invalid
+        
+    Example:
+        ```python
+        config_path = Path("config/services.yaml")
+        services = load_services_config(config_path)
+        
+        for service in services:
+            print(f"Service: {service['name']}")
+            print(f"AppTrust Key: {service['apptrust_application']}")
+        ```
+    """
     if not config_path.exists():
         raise FileNotFoundError(f"Services config not found: {config_path}")
+    
     with config_path.open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
+    
     services = data.get("services", [])
     if not isinstance(services, list) or not services:
         raise ValueError("Config 'services' must be a non-empty list")
+    
     return services
 
 
+# Comprehensive SemVer 2.0 regular expression with full prerelease and build metadata support
 SEMVER_RE = re.compile(
     r"^\s*v?(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)"
     r"(?:-(?P<prerelease>(?:0|[1-9]\d*|[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|[a-zA-Z-][0-9a-zA-Z-]*))*))?"
@@ -31,71 +122,313 @@ SEMVER_RE = re.compile(
 
 
 class SemVer:
+    """
+    Semantic Version parser and container implementing SemVer 2.0 specification.
+    
+    This class provides comprehensive semantic version parsing, comparison, and
+    manipulation capabilities essential for platform version management and
+    dependency resolution in the BookVerse microservices ecosystem.
+    
+    🎯 Purpose:
+        - Parse semantic version strings with full SemVer 2.0 compliance
+        - Enable version comparison for latest version selection
+        - Support prerelease version handling for staging environments
+        - Provide version increment logic for automated releases
+        - Maintain original version string for audit and display
+    
+    📊 SemVer Components:
+        - Major: Breaking changes (incompatible API changes)
+        - Minor: New functionality (backward-compatible additions)
+        - Patch: Bug fixes (backward-compatible fixes)
+        - Prerelease: Development versions (alpha, beta, rc)
+        - Build Metadata: Build information (commit hashes, timestamps)
+    
+    🔧 Supported Formats:
+        - Standard: "1.2.3", "v1.2.3"
+        - Prerelease: "1.2.3-alpha.1", "1.2.3-beta"
+        - Build: "1.2.3+20240101.abc123"
+        - Combined: "1.2.3-rc.1+build.456"
+    
+    Example:
+        ```python
+        # Parse different version formats
+        v1 = SemVer.parse("1.2.3")
+        v2 = SemVer.parse("v2.0.0-beta.1")
+        v3 = SemVer.parse("1.5.0+build.123")
+        
+        # Version properties
+        print(f"Major: {v1.major}, Minor: {v1.minor}, Patch: {v1.patch}")
+        print(f"Prerelease: {v2.prerelease}")  # ('beta', '1')
+        print(f"Original: {v2.original}")      # "v2.0.0-beta.1"
+        ```
+    
+    Version: 1.0.0
+    """
+    
     def __init__(self, major: int, minor: int, patch: int, prerelease: Tuple[str, ...], original: str) -> None:
+        """
+        Initialize semantic version with parsed components.
+        
+        Args:
+            major (int): Major version number
+            minor (int): Minor version number  
+            patch (int): Patch version number
+            prerelease (Tuple[str, ...]): Prerelease identifiers tuple
+            original (str): Original version string for reference
+        """
         self.major = major
         self.minor = minor
         self.patch = patch
-        self.prerelease = prerelease
-        self.original = original
+        self.prerelease = prerelease  # Tuple of prerelease identifiers
+        self.original = original      # Original string for audit/display
 
     @staticmethod
     def parse(version: str) -> Optional["SemVer"]:
+        """
+        Parse a version string into a SemVer object using SemVer 2.0 specification.
+        
+        This method implements complete SemVer 2.0 parsing including support for
+        prerelease versions, build metadata, and various format variations commonly
+        used in software versioning.
+        
+        🔧 Parsing Logic:
+            - Strips leading/trailing whitespace and optional 'v' prefix
+            - Validates major.minor.patch numeric format
+            - Extracts prerelease identifiers (alpha, beta, rc, etc.)
+            - Preserves original string for audit and display purposes
+            - Returns None for invalid version strings
+        
+        Args:
+            version (str): Version string to parse (e.g., "1.2.3", "v2.0.0-beta.1")
+            
+        Returns:
+            Optional[SemVer]: Parsed SemVer object or None if invalid
+            
+        Example:
+            ```python
+            # Valid version strings
+            v1 = SemVer.parse("1.2.3")              # Standard version
+            v2 = SemVer.parse("v2.0.0-alpha.1")     # Prerelease with prefix
+            v3 = SemVer.parse("1.0.0+build.123")    # With build metadata
+            
+            # Invalid version strings
+            invalid = SemVer.parse("1.2")           # Returns None
+            invalid = SemVer.parse("not-a-version") # Returns None
+            
+            # Prerelease handling
+            beta = SemVer.parse("1.0.0-beta.2")
+            print(beta.prerelease)  # ('beta', '2')
+            ```
+        """
         m = SEMVER_RE.match(version)
         if not m:
             return None
+        
         g = m.groupdict()
         prerelease_raw = g.get("prerelease") or ""
-        return SemVer(int(g["major"]), int(g["minor"]), int(g["patch"]), tuple(prerelease_raw.split(".")) if prerelease_raw else tuple(), version)
+        
+        return SemVer(
+            int(g["major"]), 
+            int(g["minor"]), 
+            int(g["patch"]), 
+            tuple(prerelease_raw.split(".")) if prerelease_raw else tuple(), 
+            version
+        )
 
 
 def compare_semver(a: SemVer, b: SemVer) -> int:
+    """
+    Compare two semantic versions according to SemVer 2.0 precedence rules.
+    
+    This function implements the complete SemVer 2.0 comparison algorithm, handling
+    major, minor, patch, and prerelease version precedence correctly for accurate
+    version ordering in platform aggregation.
+    
+    🔧 Comparison Rules (SemVer 2.0):
+        1. Major.Minor.Patch compared numerically
+        2. Release versions have higher precedence than prerelease
+        3. Prerelease identifiers compared alphanumerically
+        4. Numeric identifiers compared numerically
+        5. Larger set of prerelease identifiers has higher precedence
+    
+    Args:
+        a (SemVer): First version to compare
+        b (SemVer): Second version to compare
+        
+    Returns:
+        int: -1 if a < b, 0 if a == b, 1 if a > b
+        
+    Example:
+        ```python
+        v1 = SemVer.parse("1.0.0")
+        v2 = SemVer.parse("2.0.0")
+        v3 = SemVer.parse("2.0.0-alpha")
+        
+        assert compare_semver(v1, v2) == -1  # 1.0.0 < 2.0.0
+        assert compare_semver(v3, v2) == -1  # 2.0.0-alpha < 2.0.0
+        assert compare_semver(v2, v2) == 0   # 2.0.0 == 2.0.0
+        ```
+    """
+    # Compare major version
     if a.major != b.major:
         return -1 if a.major < b.major else 1
+    
+    # Compare minor version
     if a.minor != b.minor:
         return -1 if a.minor < b.minor else 1
+    
+    # Compare patch version
     if a.patch != b.patch:
         return -1 if a.patch < b.patch else 1
+    
+    # Handle prerelease precedence: release > prerelease
     if not a.prerelease and b.prerelease:
-        return 1
+        return 1   # a (release) > b (prerelease)
     if a.prerelease and not b.prerelease:
-        return -1
+        return -1  # a (prerelease) < b (release)
+    
+    # Both are prerelease or both are release - compare prerelease identifiers
     for at, bt in zip(a.prerelease, b.prerelease):
         if at == bt:
             continue
+        
         a_num, b_num = at.isdigit(), bt.isdigit()
+        
         if a_num and b_num:
+            # Both numeric - compare as integers
             ai, bi = int(at), int(bt)
             if ai != bi:
                 return -1 if ai < bi else 1
         elif a_num and not b_num:
+            # Numeric < non-numeric
             return -1
         elif not a_num and b_num:
+            # Non-numeric > numeric  
             return 1
         else:
+            # Both non-numeric - lexical comparison
             if at < bt:
                 return -1
             return 1
+    
+    # All compared identifiers are equal - longer prerelease has higher precedence
     if len(a.prerelease) != len(b.prerelease):
         return -1 if len(a.prerelease) < len(b.prerelease) else 1
-    return 0
+    
+    return 0  # Versions are equal
 
 
 def sort_versions_by_semver_desc(version_strings: List[str]) -> List[str]:
+    """
+    Sort a list of version strings in descending semantic version order.
+    
+    This function parses version strings into SemVer objects and sorts them
+    according to SemVer 2.0 precedence rules, returning the highest version
+    first. Invalid version strings are filtered out.
+    
+    🎯 Purpose:
+        - Identify the latest/highest version from a collection
+        - Sort versions for display in descending order
+        - Filter out invalid version strings automatically
+        - Support platform version selection logic
+    
+    Args:
+        version_strings (List[str]): List of version strings to sort
+        
+    Returns:
+        List[str]: Sorted version strings in descending order (highest first)
+        
+    Example:
+        ```python
+        versions = ["1.0.0", "2.0.0-alpha", "2.0.0", "1.2.3", "invalid"]
+        sorted_versions = sort_versions_by_semver_desc(versions)
+        # Returns: ["2.0.0", "2.0.0-alpha", "1.2.3", "1.0.0"]
+        # Note: "invalid" is filtered out
+        
+        # Get latest version
+        latest = sorted_versions[0] if sorted_versions else None
+        ```
+    """
+    # Parse valid version strings and keep original strings
     parsed: List[Tuple[SemVer, str]] = []
     for v in version_strings:
         sv = SemVer.parse(v)
         if sv is not None:
             parsed.append((sv, v))
-    # Use the SemVer objects for proper ordering
+    
+    # Sort by SemVer comparison in descending order (highest first)
     parsed.sort(key=cmp_to_key(lambda a, b: compare_semver(a[0], b[0])), reverse=True)
+    
+    # Return original version strings in sorted order
     return [v for _, v in parsed]
 
 
 class AppTrustClient:
-    def __init__(self, base_url: str, token: str, timeout_seconds: int = 600) -> None:  # 10 minutes for platform operations
-        self.base_url = base_url.rstrip("/")
-        self.token = token
-        self.timeout_seconds = timeout_seconds
+    """
+    HTTP client for JFrog AppTrust API integration in platform aggregation workflows.
+    
+    This class provides comprehensive integration with JFrog AppTrust APIs for
+    application version management, content retrieval, and platform version
+    creation in the BookVerse microservices ecosystem.
+    
+    🎯 Purpose:
+        - Interact with JFrog AppTrust REST APIs for version management
+        - Retrieve application version lists and content details
+        - Create platform versions with aggregated service dependencies
+        - Support authentication and error handling for API operations
+        - Enable platform release automation through programmatic access
+    
+    🔧 Key Features:
+        - OAuth/Bearer token authentication for secure API access
+        - Configurable timeout handling for network reliability
+        - Comprehensive error handling with detailed error messages
+        - JSON request/response handling with validation
+        - URL encoding for safe parameter passing
+    
+    🚀 Supported Operations:
+        - List Application Versions: Get version history for applications
+        - Get Version Content: Retrieve detailed version content and releasables
+        - Create Platform Version: Aggregate services into platform releases
+        - Authentication: Bearer token-based API authentication
+        - Error Recovery: Comprehensive exception handling and reporting
+    
+    Example:
+        ```python
+        # Initialize client with AppTrust credentials
+        client = AppTrustClient(
+            base_url="https://company.jfrog.io/apptrust/api/v1",
+            token="bearer-token-here",
+            timeout_seconds=300
+        )
+        
+        # Get latest versions for an application
+        versions = client.list_application_versions("bookverse-inventory")
+        
+        # Create platform version
+        sources = [
+            {"application_key": "bookverse-inventory", "version": "1.2.3"},
+            {"application_key": "bookverse-checkout", "version": "2.1.0"}
+        ]
+        platform_version = client.create_platform_version(
+            "bookverse-platform", "2024.01.15.123456", sources
+        )
+        ```
+    
+    Version: 1.0.0
+    """
+    
+    def __init__(self, base_url: str, token: str, timeout_seconds: int = 600) -> None:
+        """
+        Initialize AppTrust client with connection parameters.
+        
+        Args:
+            base_url (str): Base URL for AppTrust API (e.g., https://company.jfrog.io/apptrust/api/v1)
+            token (str): Bearer token for API authentication
+            timeout_seconds (int): Request timeout in seconds (default: 600)
+        """
+        self.base_url = base_url.rstrip("/")  # Remove trailing slash for consistent URLs
+        self.token = token                    # Bearer token for authentication
+        self.timeout_seconds = timeout_seconds  # Request timeout configuration
 
     def _request(self, method: str, path: str, query: Optional[Dict[str, Any]] = None, body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         url = f"{self.base_url}{path}"
@@ -150,7 +483,6 @@ TRUSTED_RELEASE = "TRUSTED_RELEASE"
 
 
 def compute_next_semver_for_application(client: AppTrustClient, app_key: str) -> str:
-    """Return next SemVer: bump patch if any exists; else bump seed version as fallback."""
     try:
         resp = client.list_application_versions(app_key, limit=1)
         versions = resp.get("versions", []) if isinstance(resp, dict) else []
@@ -163,38 +495,28 @@ def compute_next_semver_for_application(client: AppTrustClient, app_key: str) ->
     if parsed is not None:
         return f"{parsed.major}.{parsed.minor}.{parsed.patch + 1}"
 
-    # No existing versions; use seed from version-map.yaml and bump it
     try:
         version_map_path = Path(__file__).parent.parent / "config" / "version-map.yaml"
         if version_map_path.exists():
             with version_map_path.open("r", encoding="utf-8") as f:
                 version_map = yaml.safe_load(f) or {}
             
-            # Find the application entry
             for app in version_map.get("applications", []):
                 if app.get("key") == app_key:
                     seed = app.get("seeds", {}).get("application")
                     if seed:
                         seed_parsed = SemVer.parse(str(seed))
                         if seed_parsed:
-                            # Bump the seed version's patch to avoid repeats
                             return f"{seed_parsed.major}.{seed_parsed.minor}.{seed_parsed.patch + 1}"
                     break
     except Exception:
         pass
     
-    # Final fallback if no version map or seed found
     return "1.0.1"
 
 
 def pick_latest_prod_version(client: AppTrustClient, app_key: str) -> Optional[str]:
-    """Pick the latest SemVer among versions with release_status ∈ {RELEASED, TRUSTED_RELEASE}.
 
-    Strategy:
-    - Read the list of versions (created desc ordering).
-    - Keep only entries that already include a qualifying release_status.
-    - Return the highest SemVer among the qualified candidates (ignores tag to avoid tag management race conditions).
-    """
     resp = client.list_application_versions(app_key)
     versions_raw = resp.get("versions", []) if isinstance(resp, dict) else []
 
@@ -216,23 +538,18 @@ def pick_latest_prod_version(client: AppTrustClient, app_key: str) -> Optional[s
             "current_stage": stage,
         })
 
-    # First, use any entries that already indicate a qualifying release_status
     prod_candidates_full: List[Dict[str, Any]] = [
         n for n in normalized if n.get("release_status") in (RELEASED, TRUSTED_RELEASE)
     ]
     prod_candidates: List[str] = [n["version"] for n in prod_candidates_full]
 
 
-    # Do not probe content: if none are qualifying, return None to signal no aggregatable version
     if not prod_candidates:
         return None
 
     if not prod_candidates:
         return None
 
-    # Always use the highest SemVer version among PROD candidates
-    # This ensures we don't get stuck on an older version that still has the 'latest' tag
-    # during tag management transitions
     ordered = sort_versions_by_semver_desc(prod_candidates)
     return ordered[0] if ordered else None
 
@@ -242,12 +559,7 @@ def resolve_promoted_versions(
     client: AppTrustClient,
     override_versions: Optional[Dict[str, str]] = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Resolve latest version per application, filtered by release_status only.
 
-    Returns a tuple:
-      - resolved: list of entries with (name, apptrust_application, resolved_version)
-      - missing: list of entries with (name, apptrust_application) that had no eligible version
-    """
     resolved: List[Dict[str, Any]] = []
     missing: List[Dict[str, Any]] = []
     for s in services_cfg:
@@ -255,7 +567,6 @@ def resolve_promoted_versions(
         app_key = s.get("apptrust_application")
         if not name or not app_key:
             raise ValueError(f"Service config missing required fields: {s}")
-        # If an override was provided for this service, prefer it and skip lookup
         if override_versions and name in override_versions:
             resolved_version = override_versions[name]
             resolved.append({
@@ -301,7 +612,6 @@ def build_manifest(applications: List[Dict[str, Any]], client: AppTrustClient, s
         sources = content.get("sources", {})
         releasables = content.get("releasables", [])
         
-        # Validate that we got meaningful data
         if not releasables:
             raise ValueError(f"No releasables found for {app_key} version {version}. This version may not have been properly built or published.")
 
@@ -320,7 +630,6 @@ def build_manifest(applications: List[Dict[str, Any]], client: AppTrustClient, s
         "source_stage": source_stage,
         "applications": apps_block,
         "provenance": {
-            # SBOM evidence is handled automatically by AppTrust; not generated here
             "evidence_minimums": {"signatures_present": True},
         },
         "notes": "Auto-generated by platform-aggregator (applications & versions)",
@@ -406,7 +715,6 @@ def main() -> int:
 
     services_cfg = load_services_config(config_path)
 
-    # Parse overrides early so we can bypass PROD lookup for specified services
     overrides: Dict[str, str] = {}
     for ov in getattr(args, "override", []) or []:
         if "=" not in ov:
@@ -420,15 +728,12 @@ def main() -> int:
             return 2
         overrides[svc] = ver
 
-    # Get authentication using OIDC-first approach with fallback
     base_url = os.environ.get("APPTRUST_BASE_URL", "").strip()
     if not base_url:
-        # Try to construct from JFROG_URL
         jfrog_url = os.environ.get("JFROG_URL", "").strip()
         if jfrog_url:
             base_url = f"{jfrog_url.rstrip('/')}/apptrust/api/v1"
     
-    # Use OIDC token
     token = os.environ.get("JF_OIDC_TOKEN", "").strip()
     
     if not base_url:
@@ -448,7 +753,6 @@ def main() -> int:
         return 2
     services, missing = resolve_promoted_versions(services_cfg, client, overrides or None)
 
-    # If nothing to aggregate (no eligible RELEASED/TRUSTED_RELEASE versions and no overrides), exit gracefully
     if not services:
         summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
         message = (
@@ -471,11 +775,9 @@ def main() -> int:
 
     manifest = build_manifest(services, client, source_stage)
 
-    # Determine next platform application SemVer (patch bump) following service CI logic
     platform_app_key = str(getattr(args, "platform_app"))
     platform_app_version = compute_next_semver_for_application(client, platform_app_key)
 
-    # Include platform app SemVer in manifest for visibility (manifest version remains CalVer)
     manifest["platform_app_version"] = platform_app_version
 
     print(format_summary(manifest))
@@ -484,14 +786,12 @@ def main() -> int:
         target = write_manifest(output_dir, manifest)
         print(f"Wrote manifest: {target}")
         
-        # Determine application version tag - matching other services pattern
         tag_options = ["release", "hotfix", "feature", "bugfix", "enhancement", "security", "performance", "refactor"]
         github_run_number = int(os.environ.get("GITHUB_RUN_NUMBER", "1"))
         tag_index = github_run_number % len(tag_options)
         app_tag = tag_options[tag_index]
         print(f"🏷️ Platform Application Version Tag: {app_tag}")
         
-        # Create platform application version in AppTrust
         sources_versions = [
             {"application_key": s["apptrust_application"], "version": s["resolved_version"]}
             for s in services

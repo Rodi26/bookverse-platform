@@ -1,15 +1,9 @@
-#!/usr/bin/env python3
-"""
-Platform Migration Summary Script
-Shows the improvements achieved through Phase 1-3 migration to infrastructure approach.
-"""
 
 import os
 import sys
 from pathlib import Path
 
 def count_lines_in_file(filepath):
-    """Count lines in a file."""
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             return len(f.readlines())
@@ -17,7 +11,6 @@ def count_lines_in_file(filepath):
         return 0
 
 def analyze_workflows():
-    """Analyze workflow improvements."""
     workflows_dir = Path(__file__).parent.parent / '.github' / 'workflows'
     
     total_lines = 0
@@ -27,7 +20,6 @@ def analyze_workflows():
         lines = count_lines_in_file(workflow_file)
         total_lines += lines
         
-        # Check for shared auth usage
         with open(workflow_file, 'r') as f:
             content = f.read()
             if 'shared-platform-auth.yml' in content:
@@ -40,7 +32,6 @@ def analyze_workflows():
     }
 
 def analyze_platform_modules():
-    """Analyze platform module improvements."""
     app_dir = Path(__file__).parent.parent / 'app'
     
     modules = ['main.py', 'auth.py']
@@ -53,7 +44,6 @@ def analyze_platform_modules():
             lines = count_lines_in_file(module_path)
             total_lines += lines
             
-            # Check for shared library usage
             with open(module_path, 'r') as f:
                 content = f.read()
                 if 'from bookverse_core' in content:
@@ -66,11 +56,9 @@ def analyze_platform_modules():
     }
 
 def main():
-    """Main summary function."""
     print("🎉 Platform Migration Summary")
     print("=" * 50)
     
-    # Workflow Analysis
     print("\n📋 Workflow Improvements:")
     print("-" * 30)
     workflow_stats = analyze_workflows()
@@ -80,7 +68,6 @@ def main():
     print(f"✅ Total workflow lines: {workflow_stats['total_lines']}")
     print(f"✅ Shared authentication coverage: {workflow_stats['shared_auth_usage']}/{workflow_stats['workflow_count']} workflows")
     
-    # Module Analysis  
     print("\n🐍 Platform Module Improvements:")
     print("-" * 35)
     module_stats = analyze_platform_modules()
@@ -90,7 +77,6 @@ def main():
     print(f"✅ Total module lines: {module_stats['total_lines']}")
     print(f"✅ Shared library adoption: {module_stats['modules_using_shared']}/{module_stats['total_modules']} modules")
     
-    # Dependencies Analysis
     print("\n📦 Dependency Improvements:")
     print("-" * 30)
     requirements_path = Path(__file__).parent.parent / 'requirements.txt'
@@ -107,7 +93,6 @@ def main():
         actual_deps = [line for line in req_lines if line.strip() and not line.strip().startswith('#')]
         print(f"✅ Total dependencies: {len(actual_deps)}")
     
-    # File Structure Analysis
     print("\n📁 File Structure Improvements:")  
     print("-" * 35)
     
@@ -122,7 +107,6 @@ def main():
     if shared_auth_file.exists():
         print("✅ Shared authentication workflow created")
     
-    # Summary
     print("\n🎯 Migration Benefits Achieved:")
     print("-" * 35)
     print("✅ Code Duplication: Eliminated 1,100+ lines of embedded library code")

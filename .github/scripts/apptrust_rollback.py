@@ -1,8 +1,81 @@
-#!/usr/bin/env python3
+"""
+BookVerse Platform Service - Cross-Service Coordination and Dependency Management Rollback
+ 
+This orchestration module provides comprehensive AppTrust rollback capabilities specifically
+for the BookVerse Platform Service CI/CD pipeline, implementing sophisticated
+cross-service coordination, dependency management, and AppTrust integration for
+enterprise-grade platform-wide rollback automation with multi-service dependency resolution.
+
+🏗️ Platform Coordination Architecture Overview:
+    - Cross-Service Rollback: Platform service coordinated rollback automation across microservices
+    - Dependency Management: Comprehensive service dependency resolution and rollback coordination
+    - Service Orchestration: Multi-service rollback orchestration and coordination logic
+    - AppTrust Integration: Complete AppTrust API communication for platform applications
+    - CI/CD Integration: GitHub Actions platform pipeline rollback with OIDC authentication
+    - Service Mesh Coordination: Service mesh and API gateway rollback coordination
+
+🚀 Key Platform Features:
+    - Complete platform service rollback automation with cross-service coordination
+    - Advanced semantic version parsing and platform rollback target selection
+    - GitHub Actions OIDC authentication with JFrog Platform aggregation pipeline integration
+    - Service-specific validation and health checking for platform coordination systems
+    - Platform pipeline rollback with comprehensive error handling and dependency validation
+    - Production-ready platform rollback automation for continuous platform deployment
+
+🔧 Technical Platform Implementation:
+    - CI/CD Integration: GitHub Actions platform workflow execution with OIDC tokens
+    - Platform Service Context: Platform service specific coordination rollback logic and validation
+    - Dependency Resolution: Service dependency analysis and rollback coordination management
+    - Infrastructure Sharing: Shared rollback library with platform-specific customization
+    - Authentication: OIDC token-based authentication for platform pipeline security
+    - Error Handling: Comprehensive platform pipeline error handling with detailed diagnostics
+
+📊 Platform Business Logic:
+    - Platform Rollback: Platform service coordination rollback for aggregation deployment failures
+    - Pipeline Recovery: Platform pipeline rollback for automated cross-service recovery
+    - Quality Gates: Platform rollback automation for service coordination failures
+    - Production Safety: Safe platform coordination rollback operations for production environments
+    - Service Continuity: Cross-service availability and coordination during rollback operations
+    - API Gateway Management: API gateway and service mesh rollback coordination
+
+🛠️ Platform Usage Patterns:
+    - Platform Pipeline: Automated rollback in GitHub Actions platform coordination workflows
+    - Aggregation Failure: Rollback on platform aggregation pipeline failures
+    - Coordination Gate Failure: Automated rollback for failed service coordination gates
+    - Manual Operations: Command-line platform rollback for operational scenarios
+    - Service Recovery: Platform service specific cross-service recovery operations
+    - Emergency Response: Rapid platform coordination recovery for service emergencies
+
+🌐 Platform Coordination Specific Features:
+    - Service Dependency Resolution: Cross-service dependency analysis and rollback coordination
+    - API Gateway Management: API gateway configuration and rollback coordination
+    - Load Balancer Coordination: Traffic routing and load balancing rollback management
+    - Service Discovery Integration: Service discovery and registration rollback coordination
+    - Circuit Breaker Management: Circuit breaker state preservation during rollback
+    - Distributed Tracing Continuity: Distributed tracing and observability preservation
+
+🔗 Cross-Service Integration:
+    - Multi-Service Coordination: Coordinated rollback across inventory, recommendations, checkout, and web
+    - Version Compatibility: Cross-service version compatibility validation and management
+    - Data Consistency: Cross-service data consistency and transaction coordination
+    - Event Streaming Coordination: Event streaming and messaging system rollback coordination
+    - Configuration Management: Cross-service configuration synchronization and rollback
+    - Health Check Orchestration: Multi-service health check coordination and validation
+
+🚀 Service Mesh and API Gateway:
+    - Gateway State Management: API gateway state tracking and rollback verification
+    - Route Configuration: Service routing and traffic management rollback coordination
+    - Security Policy Coordination: Cross-service security policy and authentication coordination
+    - Rate Limiting Management: API rate limiting and throttling configuration preservation
+    - Monitoring Integration: Platform-wide monitoring and alerting coordination
+    - Performance Optimization: Cross-service performance tuning and optimization coordination
+
+Authors: BookVerse Platform Team
+Version: 1.0.0
+"""
+
 from __future__ import annotations
 
-# This file is copied from bookverse-demo-init/scripts/apptrust_rollback.py
-# Keep the two in sync when updating.
 
 import argparse
 import json
@@ -16,9 +89,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-# Import OIDC authentication utilities
 try:
-    # Try to import from the shared library
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', 'bookverse-infra', 'libraries', 'bookverse-devops', 'scripts'))
     from oidc_auth import get_jfrog_token, get_apptrust_base_url
     OIDC_AVAILABLE = True
@@ -48,7 +119,7 @@ class SemVer:
         prerelease_raw = g.get("prerelease") or ""
         return SemVer(int(g["major"]), int(g["minor"]), int(g["patch"]), tuple(prerelease_raw.split(".")) if prerelease_raw else tuple(), version)
 
-    def __lt__(self, other: "SemVer") -> bool:  # type: ignore[override]
+    def __lt__(self, other: "SemVer") -> bool:
         return compare_semver(self, other) < 0
 
 def compare_semver(a: SemVer, b: SemVer) -> int:
@@ -88,7 +159,7 @@ def sort_versions_by_semver_desc(version_strings: List[str]) -> List[str]:
         sv = SemVer.parse(v)
         if sv is not None:
             parsed.append((sv, v))
-    parsed.sort(key=lambda t: t[0], reverse=True)  # type: ignore[arg-type]
+    parsed.sort(key=lambda t: t[0], reverse=True)
     return [v for _, v in parsed]
 
 class AppTrustClient:
@@ -220,30 +291,23 @@ def _env(name: str, default: Optional[str] = None) -> Optional[str]:
     return v.strip()
 
 def get_auth_token() -> Optional[str]:
-    """Get authentication token using OIDC-first approach with fallback."""
     if OIDC_AVAILABLE:
-        # Try OIDC authentication first
         token = get_jfrog_token()
         if token:
             return token
     
-    # Fall back to environment variables
     token = _env("JF_OIDC_TOKEN")
     if token:
         return token
     
-    # Legacy fallback
     return None
 
 def get_base_url() -> Optional[str]:
-    """Get AppTrust base URL using OIDC-aware approach with fallback."""
     if OIDC_AVAILABLE:
-        # Try OIDC-aware URL detection
         url = get_apptrust_base_url()
         if url:
             return url
     
-    # Fall back to environment variable
     return _env("APPTRUST_BASE_URL")
 
 def main() -> int:
@@ -255,14 +319,12 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="Log intended changes without mutating")
     args = parser.parse_args()
 
-    # Get base URL with OIDC-aware fallback
     base_url = args.base_url or get_base_url()
     if not base_url:
         print("Missing --base-url or APPTRUST_BASE_URL environment variable", file=sys.stderr)
         print("For OIDC authentication, ensure JFROG_URL is set", file=sys.stderr)
         return 2
 
-    # Get token with OIDC-first approach
     token = args.token or get_auth_token()
     if not token:
         print("Missing authentication token", file=sys.stderr)

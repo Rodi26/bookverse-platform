@@ -1,3 +1,2 @@
-"""Platform aggregator package initialization."""
 
 

@@ -1,50 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# =============================================================================
-# UNIFIED SEMVER DETERMINATION SCRIPT
-# =============================================================================
-# This script provides a unified approach to semver determination across all
-# BookVerse services, preventing the fallback-to-seed conflicts with Release Bundles.
-#
-# Usage:
-#   ./determine-semver.sh --application-key bookverse-web \
-#                        --version-map ./config/version-map.yaml \
-#                        --jfrog-url "$JFROG_URL" \
-#                        --jfrog-token "$JF_OIDC_TOKEN" \
-#                        --project-key "$PROJECT_KEY" \
-#                        --packages "web,web-assets.tar.gz"
-#
-# Environment Variables Set:
-#   APP_VERSION     - Application version (e.g., 2.4.17)
-#   BUILD_NUMBER    - Build number (e.g., 3.7.26)
-#   IMAGE_TAG       - Docker image tag (defaults to BUILD_NUMBER)
-#   DOCKER_TAG_*    - Package-specific tags (e.g., DOCKER_TAG_WEB=1.6.15)
-#
-# =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON_SCRIPT="$SCRIPT_DIR/semver_versioning.py"
 
-# Check if Python script exists
 if [[ ! -f "$PYTHON_SCRIPT" ]]; then
     echo "❌ Error: Python script not found at $PYTHON_SCRIPT" >&2
     exit 1
 fi
 
-# Check if Python 3 is available
 if ! command -v python3 >/dev/null 2>&1; then
     echo "❌ Error: python3 is required but not found" >&2
     exit 1
 fi
 
-# Check if PyYAML is available
 if ! python3 -c "import yaml" >/dev/null 2>&1; then
     echo "❌ Error: PyYAML is required. Install with: pip install PyYAML" >&2
     exit 1
 fi
 
-# Default values
 APPLICATION_KEY=""
 VERSION_MAP=""
 JFROG_URL=""
@@ -53,8 +28,7 @@ PROJECT_KEY=""
 PACKAGES=""
 VERBOSE=false
 
-# Parse command line arguments
-while [[ $# -gt 0 ]]; do
+while [[ $
     case $1 in
         --application-key)
             APPLICATION_KEY="$2"
@@ -108,7 +82,6 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Validate required arguments
 if [[ -z "$APPLICATION_KEY" ]]; then
     echo "❌ Error: --application-key is required" >&2
     exit 1
@@ -134,7 +107,6 @@ if [[ ! -f "$VERSION_MAP" ]]; then
     exit 1
 fi
 
-# Prepare arguments for Python script
 PYTHON_ARGS=(
     --application-key "$APPLICATION_KEY"
     --version-map "$VERSION_MAP"
@@ -150,7 +122,6 @@ if [[ -n "$PACKAGES" ]]; then
     PYTHON_ARGS+=(--packages "$PACKAGES")
 fi
 
-# Execute Python script
 if [[ "$VERBOSE" == "true" ]]; then
     echo "🔧 Executing: python3 $PYTHON_SCRIPT ${PYTHON_ARGS[*]}"
 fi
@@ -169,7 +140,6 @@ if [[ "$VERBOSE" == "true" ]]; then
     echo "$OUTPUT"
 fi
 
-# Parse JSON output to show summary
 if command -v jq >/dev/null 2>&1; then
     echo "🧮 Version determination results:"
     echo "$OUTPUT" | jq -r '"  App Version: " + .app_version'

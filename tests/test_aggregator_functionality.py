@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-"""
-Platform Aggregator Functionality Tests
-Tests the core platform aggregation functionality in isolation.
-"""
 
 import os
 import sys
@@ -12,14 +7,11 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 import unittest
 
-# Add platform app directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 class TestPlatformAggregator(unittest.TestCase):
-    """Test platform aggregator functionality."""
     
     def setUp(self):
-        """Set up test environment."""
         self.test_env = {
             'JFROG_URL': 'https://test.jfrog.io',
             'JF_OIDC_TOKEN': 'test-oidc-token-123'
@@ -46,12 +38,10 @@ class TestPlatformAggregator(unittest.TestCase):
         ]
     
     def test_services_config_loading(self):
-        """Test loading services configuration."""
         print("\n🧪 Testing Services Config Loading...")
         
         from app.main import load_services_config
         
-        # Create temporary config file
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
             import yaml
             yaml.dump({'services': self.mock_services_config}, f)
@@ -67,14 +57,11 @@ class TestPlatformAggregator(unittest.TestCase):
             os.unlink(temp_config_path)
     
     def test_semver_computation(self):
-        """Test next semantic version computation."""
         print("\n🧪 Testing SemVer Computation...")
         
         from app.main import compute_next_semver_for_application, AppTrustClient
         
-        # Mock AppTrust client responses
         with patch.object(AppTrustClient, 'list_application_versions') as mock_list:
-            # Test with existing versions
             mock_list.return_value = {
                 'versions': [
                     {'version': '1.2.3'},
@@ -88,20 +75,16 @@ class TestPlatformAggregator(unittest.TestCase):
             self.assertEqual(next_version, '1.2.4')
             print("✅ SemVer patch increment works")
             
-            # Test with no existing versions
             mock_list.return_value = {'versions': []}
             next_version = compute_next_semver_for_application(client, 'new-app')
-            # Should return seed version + 1 or fallback
             self.assertRegex(next_version, r'\d+\.\d+\.\d+')
             print("✅ SemVer fallback works")
     
     def test_version_resolution(self):
-        """Test version resolution from PROD stage."""
         print("\n🧪 Testing Version Resolution...")
         
         from app.main import resolve_promoted_versions, pick_latest_prod_version, AppTrustClient
         
-        # Mock AppTrust client
         with patch.object(AppTrustClient, 'list_application_versions') as mock_list:
             mock_list.return_value = {
                 'versions': [
@@ -113,12 +96,10 @@ class TestPlatformAggregator(unittest.TestCase):
             
             client = AppTrustClient('https://test.com', 'token')
             
-            # Test latest PROD version picking
             latest = pick_latest_prod_version(client, 'bookverse-inventory')
             self.assertEqual(latest, '1.8.3')
             print("✅ Latest PROD version selection works")
             
-            # Test version resolution for services
             resolved, missing = resolve_promoted_versions(self.mock_services_config, client)
             self.assertEqual(len(resolved), 2)
             self.assertEqual(len(missing), 0)
@@ -126,12 +107,10 @@ class TestPlatformAggregator(unittest.TestCase):
             print("✅ Service version resolution works")
     
     def test_latest_tag_race_condition_fix(self):
-        """Test that pick_latest_prod_version ignores 'latest' tag and uses highest SemVer."""
         print("\n🧪 Testing Latest Tag Race Condition Fix...")
         
         from app.main import pick_latest_prod_version, AppTrustClient
         
-        # Mock AppTrust client with scenario where older version has 'latest' tag
         with patch.object(AppTrustClient, 'list_application_versions') as mock_list:
             mock_list.return_value = {
                 'versions': [
@@ -143,18 +122,15 @@ class TestPlatformAggregator(unittest.TestCase):
             
             client = AppTrustClient('https://test.com', 'token')
             
-            # Should pick 2.0.0 (highest SemVer) even though 1.9.0 has 'latest' tag
             latest = pick_latest_prod_version(client, 'bookverse-inventory')
             self.assertEqual(latest, '2.0.0')
             print("✅ Correctly ignores 'latest' tag and picks highest SemVer version")
     
     def test_manifest_building(self):
-        """Test platform manifest building."""
         print("\n🧪 Testing Manifest Building...")
         
         from app.main import build_manifest, AppTrustClient
         
-        # Mock AppTrust client responses
         with patch.object(AppTrustClient, 'get_version_content') as mock_content:
             mock_content.return_value = {
                 'sources': {'build_info': 'test'},
@@ -172,7 +148,6 @@ class TestPlatformAggregator(unittest.TestCase):
             client = AppTrustClient('https://test.com', 'token')
             manifest = build_manifest(applications, client, 'PROD')
             
-            # Validate manifest structure
             self.assertIn('version', manifest)
             self.assertIn('created_at', manifest)
             self.assertIn('source_stage', manifest)
@@ -189,7 +164,6 @@ class TestPlatformAggregator(unittest.TestCase):
             print("✅ Manifest building works")
     
     def test_manifest_writing(self):
-        """Test manifest file writing."""
         print("\n🧪 Testing Manifest Writing...")
         
         from app.main import write_manifest
@@ -207,12 +181,10 @@ class TestPlatformAggregator(unittest.TestCase):
             output_dir = Path(temp_dir)
             manifest_path = write_manifest(output_dir, test_manifest)
             
-            # Verify file was written
             self.assertTrue(manifest_path.exists())
             self.assertTrue(manifest_path.name.startswith('platform-'))
             self.assertTrue(manifest_path.name.endswith('.yaml'))
             
-            # Verify content
             import yaml
             with open(manifest_path, 'r') as f:
                 written_manifest = yaml.safe_load(f)
@@ -223,12 +195,10 @@ class TestPlatformAggregator(unittest.TestCase):
             print("✅ Manifest writing works")
     
     def test_aggregator_cli_args(self):
-        """Test aggregator command line argument parsing."""
         print("\n🧪 Testing Aggregator CLI Arguments...")
         
         from app.main import parse_args
         
-        # Test with mock sys.argv
         test_args = [
             'app.main',
             '--config', 'test-config.yaml',
@@ -252,12 +222,10 @@ class TestPlatformAggregator(unittest.TestCase):
             print("✅ CLI argument parsing works")
     
     def test_override_handling(self):
-        """Test version override functionality."""
         print("\n🧪 Testing Version Override Handling...")
         
         from app.main import resolve_promoted_versions, AppTrustClient
         
-        # Mock client (won't be called for overridden services)
         client = AppTrustClient('https://test.com', 'token')
         
         overrides = {
@@ -272,7 +240,6 @@ class TestPlatformAggregator(unittest.TestCase):
         self.assertEqual(len(resolved), 2)
         self.assertEqual(len(missing), 0)
         
-        # Find resolved services
         inventory_resolved = next(r for r in resolved if r['name'] == 'inventory')
         recommendations_resolved = next(r for r in resolved if r['name'] == 'recommendations')
         
@@ -282,7 +249,6 @@ class TestPlatformAggregator(unittest.TestCase):
         print("✅ Version override handling works")
     
     def test_format_summary(self):
-        """Test platform summary formatting."""
         print("\n🧪 Testing Summary Formatting...")
         
         from app.main import format_summary
@@ -306,7 +272,6 @@ class TestPlatformAggregator(unittest.TestCase):
         print("✅ Summary formatting works")
 
 def run_aggregator_tests():
-    """Run aggregator-specific tests."""
     print("🚀 Starting Platform Aggregator Functionality Testing")
     print("=" * 65)
     
@@ -316,7 +281,6 @@ def run_aggregator_tests():
     runner = unittest.TextTestRunner(verbosity=2, stream=sys.stdout)
     result = runner.run(suite)
     
-    # Summary
     print("\n" + "=" * 65)
     print("🏁 Aggregator Testing Summary")
     print("-" * 35)

@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-"""
-Complete End-to-End Platform Testing Suite
-Runs all platform tests and provides comprehensive validation results.
-"""
 
 import os
 import sys
@@ -11,7 +6,6 @@ import json
 from pathlib import Path
 
 def run_test_suite(test_name, test_file):
-    """Run a specific test suite and capture results."""
     print(f"\n{'='*60}")
     print(f"🧪 Running {test_name}")
     print(f"{'='*60}")
@@ -42,14 +36,12 @@ def run_test_suite(test_name, test_file):
         }
 
 def validate_platform_functionality():
-    """Validate core platform functionality without full tests."""
     print(f"\n{'='*60}")
     print(f"🔍 Quick Platform Functionality Validation")
     print(f"{'='*60}")
     
     validations = []
     
-    # Test 1: Module imports
     try:
         sys.path.insert(0, str(Path(__file__).parent.parent))
         from app import main, auth
@@ -62,7 +54,6 @@ def validate_platform_functionality():
         if str(Path(__file__).parent.parent) in sys.path:
             sys.path.remove(str(Path(__file__).parent.parent))
     
-    # Test 2: Configuration files
     config_files = [
         'config/services.yaml',
         'config/version-map.yaml', 
@@ -77,7 +68,6 @@ def validate_platform_functionality():
         else:
             validations.append(f"❌ {config_file} missing")
     
-    # Test 3: Python compilation
     try:
         app_files = ['app/main.py', 'app/auth.py']
         for app_file in app_files:
@@ -91,7 +81,6 @@ def validate_platform_functionality():
     except Exception as e:
         validations.append(f"❌ Compilation test failed: {e}")
     
-    # Test 4: Workflow YAML validity
     try:
         import yaml
         workflows_dir = platform_root / '.github' / 'workflows'
@@ -111,7 +100,6 @@ def validate_platform_functionality():
     return validations
 
 def main():
-    """Main test runner."""
     print("🚀 Complete Platform E2E Testing Suite")
     print("🎯 Testing BookVerse Platform after Infrastructure Migration")
     print("=" * 80)
@@ -119,7 +107,6 @@ def main():
     platform_root = Path(__file__).parent.parent
     tests_dir = platform_root / 'tests'
     
-    # Define test suites
     test_suites = [
         ("E2E Platform Tests", tests_dir / "test_e2e_platform.py"),
         ("Aggregator Functionality", tests_dir / "test_aggregator_functionality.py"),
@@ -127,7 +114,6 @@ def main():
         ("Workflow Integration", tests_dir / "test_workflow_integration.py")
     ]
     
-    # Run all test suites
     results = []
     for test_name, test_file in test_suites:
         if test_file.exists():
@@ -141,7 +127,6 @@ def main():
                 'error': 'Test file not found'
             })
     
-    # Run quick validation
     print(f"\n{'='*60}")
     print("🔍 Platform Functionality Validation")
     print(f"{'='*60}")
@@ -150,7 +135,6 @@ def main():
     for validation in validations:
         print(validation)
     
-    # Generate summary
     print(f"\n{'='*80}")
     print("🏁 COMPLETE E2E TESTING SUMMARY")
     print(f"{'='*80}")
@@ -199,7 +183,6 @@ def main():
     
     print(f"\n🏆 Platform Migration: {migration_status}")
     
-    # Return appropriate exit code
     if migration_status in ["COMPLETE_SUCCESS", "MOSTLY_SUCCESS"]:
         return 0
     else:

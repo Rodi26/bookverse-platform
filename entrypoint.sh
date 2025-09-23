@@ -1,11 +1,8 @@
 #!/bin/bash
 
-# Entrypoint script for BookVerse Platform Service
-# Supports aggregator CLI mode
 
 set -e
 
-# Load authentication configuration if available
 if [ -f "/app/config/auth.env" ]; then
     echo "Loading authentication configuration..."
     set -o allexport
@@ -13,7 +10,6 @@ if [ -f "/app/config/auth.env" ]; then
     set +o allexport
 fi
 
-# Determine service mode
 MODE="${1:-aggregator}"
 
 case "$MODE" in

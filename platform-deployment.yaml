@@ -23,7 +23,6 @@ spec:
         imagePullPolicy: IfNotPresent
         command: ["./entrypoint.sh", "aggregator"]
         env:
-        # OIDC Authentication Configuration
         - name: OIDC_AUTHORITY
           value: "https://auth.bookverse.com"
         - name: OIDC_AUDIENCE
@@ -34,11 +33,8 @@ spec:
           value: "true"
         - name: DEVELOPMENT_MODE
           value: "false"
-        # AppTrust Configuration (OIDC-based)
         - name: JFROG_URL
           value: "https://apptrust.jfrog.io"
-        # JF_OIDC_TOKEN will be provided by the deployment system via OIDC authentication
-        # Platform Configuration
         - name: PLATFORM_APP_KEY
           value: "bookverse-platform"
         resources:

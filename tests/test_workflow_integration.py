@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-"""
-Platform Workflow Integration Tests
-Tests the integration points and workflow configurations.
-"""
 
 import os
 import sys
@@ -13,15 +8,12 @@ from pathlib import Path
 import unittest
 
 class TestWorkflowIntegration(unittest.TestCase):
-    """Test platform workflow integration."""
     
     def setUp(self):
-        """Set up test environment."""
         self.platform_root = Path(__file__).parent.parent
         self.workflows_dir = self.platform_root / '.github' / 'workflows'
     
     def test_workflow_yaml_validity(self):
-        """Test that all workflow YAML files are valid."""
         print("\n🧪 Testing Workflow YAML Validity...")
         
         workflow_files = list(self.workflows_dir.glob('*.yml'))
@@ -40,7 +32,6 @@ class TestWorkflowIntegration(unittest.TestCase):
         print(f"✅ All {valid_count} workflow files have valid YAML syntax")
     
     def test_shared_auth_workflow_structure(self):
-        """Test shared authentication workflow structure."""
         print("\n🧪 Testing Shared Auth Workflow Structure...")
         
         auth_workflow = self.workflows_dir / 'shared-platform-auth.yml'
@@ -49,11 +40,9 @@ class TestWorkflowIntegration(unittest.TestCase):
         with open(auth_workflow, 'r') as f:
             workflow = yaml.safe_load(f)
         
-        # Test workflow structure
         self.assertIn('on', workflow)
         self.assertEqual(workflow['on'], 'workflow_call')
         
-        # Test inputs
         self.assertIn('inputs', workflow['on'])
         inputs = workflow['on']['inputs']
         
@@ -61,7 +50,6 @@ class TestWorkflowIntegration(unittest.TestCase):
         for inp in required_inputs:
             self.assertIn(inp, inputs, f"Missing input: {inp}")
         
-        # Test outputs
         self.assertIn('outputs', workflow['on'])
         outputs = workflow['on']['outputs']
         
@@ -69,14 +57,12 @@ class TestWorkflowIntegration(unittest.TestCase):
         for out in required_outputs:
             self.assertIn(out, outputs, f"Missing output: {out}")
         
-        # Test jobs
         self.assertIn('jobs', workflow)
         self.assertIn('authenticate', workflow['jobs'])
         
         print("✅ Shared auth workflow structure is correct")
     
     def test_platform_workflows_use_shared_auth(self):
-        """Test that platform workflows use shared authentication."""
         print("\n🧪 Testing Platform Workflows Use Shared Auth...")
         
         workflows_using_shared_auth = [
@@ -94,15 +80,12 @@ class TestWorkflowIntegration(unittest.TestCase):
             with open(workflow_path, 'r') as f:
                 content = f.read()
             
-            # Check for shared workflow usage
             self.assertIn('shared-platform-auth.yml', content, 
                          f"{workflow_name} should use shared auth workflow")
             
-            # Check workflow structure
             workflow = yaml.safe_load(content)
             self.assertIn('jobs', workflow)
             
-            # Should have authenticate job
             jobs = workflow['jobs']
             self.assertIn('authenticate', jobs, 
                          f"{workflow_name} should have authenticate job")
@@ -116,16 +99,12 @@ class TestWorkflowIntegration(unittest.TestCase):
         print("✅ Platform workflows properly use shared authentication")
     
     def test_workflow_environment_consistency(self):
-        """Test environment variable consistency across workflows."""
         print("\n🧪 Testing Workflow Environment Consistency...")
         
-        # Common environment variables that should be consistent
         expected_vars = [
             'JFROG_URL',
             'PROJECT_KEY',
-            # OIDC-based authentication
             'JF_OIDC_TOKEN',
-            # Base URL configuration
             'APPTRUST_BASE_URL'
         ]
         
@@ -136,7 +115,6 @@ class TestWorkflowIntegration(unittest.TestCase):
             with open(workflow_file, 'r') as f:
                 content = f.read()
             
-            # Check for environment variable usage
             var_usage = {}
             for var in expected_vars:
                 if f'vars.{var}' in content or f'env.{var}' in content or f'{var}}}' in content:
@@ -148,14 +126,11 @@ class TestWorkflowIntegration(unittest.TestCase):
         print("✅ Workflow environment variables are consistent")
     
     def test_platform_aggregator_integration(self):
-        """Test platform aggregator integration points."""
         print("\n🧪 Testing Platform Aggregator Integration...")
         
-        # Test that aggregator script exists
         aggregator_script = self.platform_root / 'app' / 'main.py'
         self.assertTrue(aggregator_script.exists(), "Aggregator script not found")
         
-        # Test services configuration
         services_config = self.platform_root / 'config' / 'services.yaml'
         self.assertTrue(services_config.exists(), "Services config not found")
         
@@ -167,7 +142,6 @@ class TestWorkflowIntegration(unittest.TestCase):
         self.assertIsInstance(services, list)
         self.assertGreater(len(services), 0)
         
-        # Validate service structure
         for service in services:
             self.assertIn('name', service)
             self.assertIn('apptrust_application', service)
@@ -176,7 +150,6 @@ class TestWorkflowIntegration(unittest.TestCase):
         print("✅ Platform aggregator integration points are correct")
     
     def test_dependency_consistency(self):
-        """Test dependency consistency across platform."""
         print("\n🧪 Testing Dependency Consistency...")
         
         requirements_file = self.platform_root / 'requirements.txt'
@@ -185,11 +158,9 @@ class TestWorkflowIntegration(unittest.TestCase):
         with open(requirements_file, 'r') as f:
             requirements = f.read()
         
-        # Check for bookverse-core dependency
         self.assertIn('bookverse-core', requirements, 
                      "Should use bookverse-core package")
         
-        # Check that embedded libs don't exist
         libs_dir = self.platform_root / 'libs'
         self.assertFalse(libs_dir.exists(), 
                         "Embedded libs directory should be removed")
@@ -197,7 +168,6 @@ class TestWorkflowIntegration(unittest.TestCase):
         print("✅ Dependencies are consistent with infrastructure approach")
     
     def test_platform_scripts_executable(self):
-        """Test that platform scripts are executable and valid."""
         print("\n🧪 Testing Platform Scripts...")
         
         scripts_dir = self.platform_root / 'scripts'
@@ -208,7 +178,6 @@ class TestWorkflowIntegration(unittest.TestCase):
         python_scripts = list(scripts_dir.glob('*.py'))
         shell_scripts = list(scripts_dir.glob('*.sh'))
         
-        # Test Python scripts
         for script in python_scripts:
             try:
                 result = subprocess.run([
@@ -221,7 +190,6 @@ class TestWorkflowIntegration(unittest.TestCase):
             except Exception as e:
                 print(f"⚠️  {script.name}: Could not test compilation - {e}")
         
-        # Test shell scripts syntax
         for script in shell_scripts:
             try:
                 result = subprocess.run([
@@ -237,23 +205,18 @@ class TestWorkflowIntegration(unittest.TestCase):
         print(f"✅ Platform scripts validated ({len(python_scripts)} Python, {len(shell_scripts)} shell)")
     
     def test_platform_module_imports(self):
-        """Test that platform modules can be imported."""
         print("\n🧪 Testing Platform Module Imports...")
         
-        # Add platform to path
         sys.path.insert(0, str(self.platform_root))
         
         try:
-            # Test main modules
             from app import main
             from app import auth  
             
             print("✅ All platform modules import successfully")
             
-            # Test that modules use shared libraries
             import app.auth
             
-            # Check for bookverse_core imports in source
             auth_file = self.platform_root / 'app' / 'auth.py'
             with open(auth_file, 'r') as f:
                 auth_content = f.read()
@@ -266,12 +229,10 @@ class TestWorkflowIntegration(unittest.TestCase):
         except ImportError as e:
             self.fail(f"❌ Module import failed: {e}")
         finally:
-            # Clean up path
             if str(self.platform_root) in sys.path:
                 sys.path.remove(str(self.platform_root))
     
     def test_platform_configuration_files(self):
-        """Test platform configuration files."""
         print("\n🧪 Testing Platform Configuration Files...")
         
         config_files = [
@@ -287,7 +248,6 @@ class TestWorkflowIntegration(unittest.TestCase):
             if file_path.exists():
                 print(f"✅ {description}: {config_file}")
                 
-                # Validate YAML files
                 if config_file.endswith('.yaml') or config_file.endswith('.yml'):
                     try:
                         with open(file_path, 'r') as f:
@@ -301,7 +261,6 @@ class TestWorkflowIntegration(unittest.TestCase):
         print("✅ Platform configuration files validated")
 
 def run_workflow_integration_tests():
-    """Run workflow integration tests."""
     print("🚀 Starting Platform Workflow Integration Testing")
     print("=" * 60)
     
@@ -311,7 +270,6 @@ def run_workflow_integration_tests():
     runner = unittest.TextTestRunner(verbosity=2, stream=sys.stdout)
     result = runner.run(suite)
     
-    # Summary
     print("\n" + "=" * 60)
     print("🏁 Workflow Integration Testing Summary")
     print("-" * 45)
