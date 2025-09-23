@@ -76,11 +76,15 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: "[Auth] OIDC Token Exchange (bookverse-devops shared script)"
-        id: exchange-oidc
-        run: |
-          echo "🔐 OIDC authentication handled by JFrog CLI setup step above"
-          echo "✅ Using new standard OIDC pattern with EyalDelarea/setup-jfrog-cli@swampUpAppTrust"
+      - name: "[Setup] JFrog CLI"
+        uses: EyalDelarea/setup-jfrog-cli@swampUpAppTrust
+        id: jfrog-cli-auth
+        with:
+          oidc-provider-name: bookverse-platform-github
+          oidc-audience: ${{ vars.JFROG_URL }}
+        env:
+          JF_URL: ${{ vars.JFROG_URL }}
+          JF_PROJECT: ${{ vars.PROJECT_KEY }}
 
       - name: "[Setup] Install Python dependencies"
         run: |
