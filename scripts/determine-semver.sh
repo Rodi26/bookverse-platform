@@ -28,7 +28,7 @@ PROJECT_KEY=""
 PACKAGES=""
 VERBOSE=false
 
-while [[ $
+while [[ $# -gt 0 ]]; do
     case $1 in
         --application-key)
             APPLICATION_KEY="$2"
