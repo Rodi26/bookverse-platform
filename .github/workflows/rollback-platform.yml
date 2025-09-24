@@ -155,9 +155,16 @@ jobs:
           echo "🧭 Starting rollback workflow"
           APPTRUST_BASE_URL="/apptrust/api/v1"
 
-          SERVICE_NAME=$(echo "${GITHUB_REPOSITORY
-          APPLICATION_KEY="bookverse-$SERVICE_NAME"
-          echo "📦 Application: $APPLICATION_KEY"
+
+          # Fix APPLICATION_KEY double prefix issue
+          SERVICE_NAME=$(echo "${GITHUB_REPOSITORY}" | cut -d'/' -f2)
+          if [[ "$SERVICE_NAME" =~ ^bookverse-(.+)$ ]]; then
+            APPLICATION_KEY="$SERVICE_NAME"  # Already has correct prefix
+            echo "🔧 SERVICE_NAME already has bookverse- prefix: $SERVICE_NAME"
+          else
+            APPLICATION_KEY="bookverse-$SERVICE_NAME"  # Add prefix
+          fi
+          echo "📦 Application (FIXED): $APPLICATION_KEY"
           echo "APPLICATION_KEY=$APPLICATION_KEY" >> $GITHUB_ENV
 
           TARGET_VERSION="${{ inputs.version || '' }}"
