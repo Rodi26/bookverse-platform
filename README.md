@@ -1,131 +1,78 @@
-# BookVerse Platform
+# BookVerse Platform Aggregator
 
-This repository is part of the JFrog AppTrust BookVerse demo. The demo highlights secure delivery across microservices using JFrog Platform capabilities: AppTrust lifecycle and promotion, SBOMs and signatures, Xray policies, and GitHub Actions OIDC for passwordless pipelines.
+Demo aggregator for the BookVerse platform, showcasing JFrog AppTrust capabilities with shared library and aggregated release patterns.
 
-## What this repository represents
+## 🎯 Demo Purpose & Patterns
 
-The Platform repo provides shared components, utilities, and templates that other BookVerse services can reuse. In the demo, it follows the same Python + Docker packaging and promotion model.
+This service demonstrates the **Shared Library & Aggregator Pattern** - showcasing how platform components, shared libraries, and aggregated releases can be managed in AppTrust.
 
-## How this repo fits the demo
+### 📚 **Shared Library & Aggregator Pattern**
+- **What it demonstrates**: Application versions built from shared libraries, common utilities, and platform aggregation
+- **AppTrust benefit**: Shared components promoted together ensuring platform consistency across all services (DEV → QA → STAGING → PROD)
+- **Real-world applicability**: Platform teams, shared library management, and enterprise-wide component distribution
 
-- CI builds Python and Docker artifacts
-- SBOM generation and signing (placeholders in scaffold)
-- Publishes to Artifactory internal repos (DEV/QA/STAGING)
-- Promotion workflow moves artifacts through AppTrust stages to PROD
-- Uses GitHub OIDC for authentication to JFrog
+This service is **platform-focused** - it demonstrates how shared components can be reliably versioned and promoted across enterprise ecosystems.
 
-## Platform Aggregator
+## 🏗️ Platform Aggregator Architecture
 
-- Aggregator CLI entrypoint: `python -m app.main`
-- Static services config: `config/services.yaml` (PROD-only sourcing; SBOM handled by AppTrust automatically)
-- Manifests output directory: `manifests/`
-- Manifest schema (application-centric):
-  - The platform manifest centers on applications and application versions, not images.
-  - For each application, the manifest embeds the `sources` and `releasables` exactly as returned by AppTrust "Show Content".
-  - Example shape:
+```
+┌─────────────────────────────────────────────────────────────┐
+│                  BookVerse Platform                         │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│                ┌─────────────────────────┐                  │
+│                │  Platform Aggregator    │                  │
+│                │                         │                  │
+│                │  Shared Libraries &     │                  │
+│                │  Common Components      │                  │
+│                │ ┌─────────────────────┐ │                  │
+│                │ │   BookVerse Core    │ │                  │
+│                │ │     Library         │ │                  │
+│                │ └─────────────────────┘ │                  │
+│                │ ┌─────────────────────┐ │                  │
+│                │ │  Platform Scripts   │ │                  │
+│                │ │   & Utilities       │ │                  │
+│                │ └─────────────────────┘ │                  │
+│                │ ┌─────────────────────┐ │                  │
+│                │ │ Version & Config    │ │                  │
+│                │ │   Management        │ │                  │
+│                │ └─────────────────────┘ │                  │
+│                └─────────────────────────┘                  │
+│                          │                                  │
+│     ┌────────────────────┼────────────────────┐             │
+│     │                    │                    │             │
+│ ┌───────────┐    ┌───────────┐    ┌───────────┐             │
+│ │Inventory  │    │ Checkout  │    │Recommend- │             │
+│ │ Service   │    │ Service   │    │ations     │             │
+│ └───────────┘    └───────────┘    └───────────┘             │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
 
-```yaml
-version: "2025.09.06.093001"           # CalVer for the manifest itself
-platform_app_version: "1.4.7"         # Platform app SemVer
-source_stage: "PROD"
-applications:
-  - application_key: "bookverse-inventory"
-    version: "1.8.3"
-    sources: { ... }                   # Pass-through from Show Content
-    releasables: { ... }               # Pass-through from Show Content
-  - application_key: "bookverse-recommendations"
-    version: "0.9.0"
-    sources: { ... }
-    releasables: { ... }
-  - application_key: "bookverse-checkout"
-    version: "0.7.2"
-    sources: { ... }
-    releasables: { ... }
-  - application_key: "bookverse-web"
-    version: "0.4.1"
-    sources: { ... }
-    releasables: { ... }
-provenance:
-  evidence_minimums:
-    signatures_present: true
-notes: "Auto-generated by platform aggregator (applications & versions; content from Show Content)"
+AppTrust Promotion Pipeline:
+DEV → QA → STAGING → PROD
+ │     │       │        │
+ └─────┴───────┴────────┘
+   Shared Libraries & Config
+   Move Together as Platform
 ```
 
-### Run locally (preview)
+## 🔧 JFrog AppTrust Integration
 
-```bash
-cd bookverse-platform
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python -m app.main --config config/services.yaml --output-dir manifests --source-stage PROD --preview
-```
+This service creates multiple artifacts per application version:
 
-### Create platform version and write manifest
+1. **Python Packages** - Shared library packages for all services
+2. **Configuration Files** - Platform-wide configuration templates
+3. **Docker Images** - Platform utility containers
+4. **SBOMs** - Software Bill of Materials for shared dependencies
+5. **Test Reports** - Integration testing across platform components
+6. **Build Evidence** - Comprehensive platform build attestations
 
-```bash
-python -m app.main --config config/services.yaml --output-dir manifests --source-stage PROD
-```
+Each artifact moves together through the promotion pipeline: DEV → QA → STAGING → PROD.
 
-### Overrides
+For the non-JFrog evidence plan and gates, see: `../bookverse-demo-init/docs/EVIDENCE_PLAN.md`.
 
-You can force specific service versions:
+## 🔄 Workflows
 
-```bash
-python -m app.main --source-stage PROD --override inventory=1.8.2 --override checkout=0.7.1
-```
-
-### Workflows
-
-- [`aggregate.yml`](.github/workflows/aggregate.yml) — Manual (default) aggregator. Resolves latest PROD microservice versions and:
-  - Preview mode (default): prints a summary only
-  - Write mode (`write=true`): writes manifest under `manifests/` and creates a platform version in AppTrust
-  - Real environments may enable a schedule (every second Monday 09:00 UTC) — commented out by default
-- [`promote-platform.yml`](.github/workflows/promote-platform.yml) — Promote a platform version to QA/STAGING/PROD via AppTrust; when targeting PROD, dispatches a helm pin to `bookverse-helm`
-- [`rollback-platform.yml`](.github/workflows/rollback-platform.yml) — Roll back a platform version in PROD; supports optional auto-resolution of the latest promoted version and a `dry_run` mode
-
-## CI Expectations
-
-GitHub variables required:
-
-- `PROJECT_KEY` = `bookverse`
-- `JFROG_URL` = your JFrog instance URL
-- `DOCKER_REGISTRY` = Docker registry hostname in Artifactory
-
-Internal repositories:
-
-- Docker: `bookverse-platform-public-docker-nonprod-local`
-- Python: `bookverse-platform-public-python-nonprod-local`
-
-Release repositories:
-
-- Docker: `bookverse-platform-public-docker-release-local`
-- Python: `bookverse-platform-public-python-release-local`
-
-## Mandatory OIDC application binding (.jfrog/config.yml)
-
-This repository must include a committed, non-sensitive JFrog configuration file `.jfrog/config.yml` declaring the AppTrust application key. This is mandatory for package binding.
-
-- The `application.key` is the source of truth for which AppTrust application receives packages uploaded by CI.
-- During OIDC-authenticated sessions, JFrog CLI reads this key so artifacts are automatically bound.
-- This file contains no secrets and must be versioned. If the key changes, commit the update.
-
-Path: `bookverse-platform/.jfrog/config.yml`
-
-Example:
-
-```yaml
-application:
-  key: "bookverse-platform"
-```
-
-## Promotion
-
-Use `.github/workflows/promote.yml` selecting QA, STAGING, or PROD. Evidence placeholders can be wired to real gates in a full setup.
-
-## Related demo resources
-
-- BookVerse scenario overview in the AppTrust demo materials
-- Other repos: `bookverse-inventory`, `bookverse-recommendations`, `bookverse-checkout`, `bookverse-demo-assets`
-
----
-This repository is intentionally minimal to showcase platform capabilities. Expand with shared platform code as needed for demos.
+- [`ci.yml`](.github/workflows/ci.yml) — CI: library tests, package builds, Docker builds, publish artifacts/build-info, AppTrust version and evidence
+- [`promote.yml`](.github/workflows/promote.yml) — Promote the platform app version through stages with evidence
+- [`promotion-rollback.yml`](.github/workflows/promotion-rollback.yml) — Roll back a promoted platform application version (demo utility)
