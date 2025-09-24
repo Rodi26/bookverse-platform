@@ -153,7 +153,7 @@ def max_semver(values: List[str]) -> Optional[str]:
     return parsed[-1][1]
 
 
-def http_get(url: str, headers: Dict[str, str], timeout: int = 30) -> Any:
+def http_get(url: str, headers: Dict[str, str], timeout: int = 300) -> Any:
     req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         data = resp.read().decode("utf-8")
@@ -163,7 +163,7 @@ def http_get(url: str, headers: Dict[str, str], timeout: int = 30) -> Any:
         return data
 
 
-def http_post(url: str, headers: Dict[str, str], data: str, timeout: int = 30) -> Any:
+def http_post(url: str, headers: Dict[str, str], data: str, timeout: int = 300) -> Any:
     req = urllib.request.Request(url, data=data.encode('utf-8'), headers=headers, method='POST')
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         response_data = resp.read().decode("utf-8")
