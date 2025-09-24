@@ -214,6 +214,7 @@ jobs:
           ALLOW_RELEASE: "false"
           EVIDENCE_PRIVATE_KEY: ${{ secrets.EVIDENCE_PRIVATE_KEY }}
           EVIDENCE_KEY_ALIAS: ${{ vars.EVIDENCE_KEY_ALIAS }}
+          APPTRUST_TIMEOUT_SECONDS: 300
         run: |
           echo "🧪 Promoting platform to DEV stage with evidence collection"
           echo "📋 Platform Version: $APP_VERSION"
@@ -252,6 +253,7 @@ jobs:
           ALLOW_RELEASE: "false"
           EVIDENCE_PRIVATE_KEY: ${{ secrets.EVIDENCE_PRIVATE_KEY }}
           EVIDENCE_KEY_ALIAS: ${{ vars.EVIDENCE_KEY_ALIAS }}
+          APPTRUST_TIMEOUT_SECONDS: 300
         run: |
           echo "🔍 Promoting platform to QA stage with evidence collection"
           echo "📋 Platform Version: $APP_VERSION"
@@ -290,6 +292,7 @@ jobs:
           ALLOW_RELEASE: "false"
           EVIDENCE_PRIVATE_KEY: ${{ secrets.EVIDENCE_PRIVATE_KEY }}
           EVIDENCE_KEY_ALIAS: ${{ vars.EVIDENCE_KEY_ALIAS }}
+          APPTRUST_TIMEOUT_SECONDS: 300
         run: |
           echo "🏗️ Promoting platform to STAGING stage with evidence collection"
           echo "📋 Platform Version: $APP_VERSION"
